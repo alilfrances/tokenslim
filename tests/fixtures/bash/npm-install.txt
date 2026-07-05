@@ -1,0 +1,55 @@
+\u001b[32mnpm\u001b[0m timing idealTree:init Completed in 18ms
+\u001b[32mnpm\u001b[0m timing idealTree:userRequests Completed in 4ms
+\u001b[32mnpm\u001b[0m http fetch GET 200 https://registry.npmjs.org/react 84ms (cache revalidated)
+\u001b[32mnpm\u001b[0m http fetch GET 200 https://registry.npmjs.org/react-dom 92ms (cache revalidated)
+reify:lodash: timing reifyNode:node_modules/lodash Completed in 4ms
+reify:lodash: timing reifyNode:node_modules/lodash Completed in 5ms
+reify:lodash: timing reifyNode:node_modules/lodash Completed in 6ms
+reify:lodash: timing reifyNode:node_modules/lodash Completed in 7ms
+reify:@types/node: timing reifyNode:node_modules/@types/node Completed in 11ms
+reify:@types/node: timing reifyNode:node_modules/@types/node Completed in 12ms
+reify:@types/node: timing reifyNode:node_modules/@types/node Completed in 13ms
+reify:@types/node: timing reifyNode:node_modules/@types/node Completed in 14ms
+reify:chalk: timing reifyNode:node_modules/chalk Completed in 21ms
+reify:chalk: timing reifyNode:node_modules/chalk Completed in 22ms
+reify:chalk: timing reifyNode:node_modules/chalk Completed in 23ms
+reify:chalk: timing reifyNode:node_modules/chalk Completed in 24ms
+reify:debug: timing reifyNode:node_modules/debug Completed in 31ms
+reify:debug: timing reifyNode:node_modules/debug Completed in 32ms
+reify:debug: timing reifyNode:node_modules/debug Completed in 33ms
+reify:debug: timing reifyNode:node_modules/debug Completed in 34ms
+reify:semver: timing reifyNode:node_modules/semver Completed in 41ms
+reify:semver: timing reifyNode:node_modules/semver Completed in 42ms
+reify:semver: timing reifyNode:node_modules/semver Completed in 43ms
+reify:semver: timing reifyNode:node_modules/semver Completed in 44ms
+reify:esbuild: timing reifyNode:node_modules/esbuild Completed in 51ms
+reify:esbuild: timing reifyNode:node_modules/esbuild Completed in 52ms
+reify:esbuild: timing reifyNode:node_modules/esbuild Completed in 53ms
+reify:esbuild: timing reifyNode:node_modules/esbuild Completed in 54ms
+reify:postcss: timing reifyNode:node_modules/postcss Completed in 61ms
+reify:postcss: timing reifyNode:node_modules/postcss Completed in 62ms
+reify:postcss: timing reifyNode:node_modules/postcss Completed in 63ms
+reify:postcss: timing reifyNode:node_modules/postcss Completed in 64ms
+reify:rollup: timing reifyNode:node_modules/rollup Completed in 71ms
+reify:rollup: timing reifyNode:node_modules/rollup Completed in 72ms
+reify:rollup: timing reifyNode:node_modules/rollup Completed in 73ms
+reify:rollup: timing reifyNode:node_modules/rollup Completed in 74ms
+reify:typescript: timing reifyNode:node_modules/typescript Completed in 81ms
+reify:typescript: timing reifyNode:node_modules/typescript Completed in 82ms
+reify:typescript: timing reifyNode:node_modules/typescript Completed in 83ms
+reify:typescript: timing reifyNode:node_modules/typescript Completed in 84ms
+reify:vite: timing reifyNode:node_modules/vite Completed in 91ms
+reify:vite: timing reifyNode:node_modules/vite Completed in 92ms
+reify:vite: timing reifyNode:node_modules/vite Completed in 93ms
+reify:vite: timing reifyNode:node_modules/vite Completed in 94ms
+reify:vitest: timing reifyNode:node_modules/vitest Completed in 101ms
+reify:vitest: timing reifyNode:node_modules/vitest Completed in 102ms
+reify:vitest: timing reifyNode:node_modules/vitest Completed in 103ms
+reify:vitest: timing reifyNode:node_modules/vitest Completed in 104ms
+added 412 packages, and audited 413 packages in 8s
+found 0 vulnerabilities
+progress 01% [>...................] \rprogress 05% [=>..................] \rprogress 10% [==>.................] \rprogress 15% [===>................] \rprogress 20% [====>...............] \rprogress 25% [=====>..............] \rprogress 30% [======>.............] \rprogress 35% [=======>............] \rprogress 40% [========>...........] \rprogress 45% [=========>..........] \rprogress 50% [==========>.........] \rprogress 55% [===========>........] \rprogress 60% [============>.......] \rprogress 65% [=============>......] \rprogress 70% [==============>.....] \rprogress 75% [===============>....] \rprogress 80% [================>...] \rprogress 85% [=================>..] \rprogress 90% [==================>.] \rprogress 95% [===================>] \rprogress 100% [====================]
+timing arborist:ctor Completed in 0ms
+timing idealTree Completed in 512ms
+timing reify Completed in 1302ms
+timing command:install Completed in 1495ms

@@ -1,0 +1,44 @@
+Traceback (most recent call last):
+  File "/workspace/app/worker.py", line 44, in run_job
+    process_invoice(job)
+  File "/workspace/app/invoice.py", line 112, in process_invoice
+    charge_card(invoice)
+  File "/workspace/app/gateway.py", line 77, in charge_card
+    raise RuntimeError("gateway timeout for charge ch_20260705_abcdef")
+RuntimeError: gateway timeout for charge ch_20260705_abcdef
+retrying job after transient failure
+Traceback (most recent call last):
+  File "/workspace/app/worker.py", line 44, in run_job
+    process_invoice(job)
+  File "/workspace/app/invoice.py", line 112, in process_invoice
+    charge_card(invoice)
+  File "/workspace/app/gateway.py", line 77, in charge_card
+    raise RuntimeError("gateway timeout for charge ch_20260705_abcdef")
+RuntimeError: gateway timeout for charge ch_20260705_abcdef
+retrying job after transient failure
+Traceback (most recent call last):
+  File "/workspace/app/worker.py", line 44, in run_job
+    process_invoice(job)
+  File "/workspace/app/invoice.py", line 112, in process_invoice
+    charge_card(invoice)
+  File "/workspace/app/gateway.py", line 77, in charge_card
+    raise RuntimeError("gateway timeout for charge ch_20260705_abcdef")
+RuntimeError: gateway timeout for charge ch_20260705_abcdef
+retrying job after transient failure
+Traceback (most recent call last):
+  File "/workspace/app/worker.py", line 44, in run_job
+    process_invoice(job)
+  File "/workspace/app/invoice.py", line 112, in process_invoice
+    charge_card(invoice)
+  File "/workspace/app/gateway.py", line 77, in charge_card
+    raise RuntimeError("gateway timeout for charge ch_20260705_abcdef")
+RuntimeError: gateway timeout for charge ch_20260705_abcdef
+retrying job after transient failure
+Traceback (most recent call last):
+  File "/workspace/app/worker.py", line 44, in run_job
+    process_invoice(job)
+  File "/workspace/app/invoice.py", line 112, in process_invoice
+    charge_card(invoice)
+  File "/workspace/app/gateway.py", line 77, in charge_card
+    raise RuntimeError("gateway timeout for charge ch_20260705_abcdef")
+RuntimeError: gateway timeout for charge ch_20260705_abcdef

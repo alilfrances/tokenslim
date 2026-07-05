@@ -1,0 +1,45 @@
+\u001b[31mFAIL\u001b[0m src/math.test.js > add() > returns the full invoice total
+  AssertionError: expected 41 to deeply equal 42
+  Expected: 42
+  Received: 41
+  at src/math.test.js:18:24
+
+ PASS src/button.test.js > renders primary button
+ PASS src/button.test.js > renders disabled button
+ PASS src/card.test.js > renders compact card
+ PASS src/card.test.js > renders expanded card
+ PASS src/table.test.js > sorts ascending
+ PASS src/table.test.js > sorts descending
+ PASS src/table.test.js > filters rows
+ PASS src/table.test.js > paginates rows
+ PASS src/forms.test.js > validates required fields
+ PASS src/forms.test.js > validates email fields
+ PASS src/forms.test.js > validates currency fields
+ PASS src/forms.test.js > shows async validation state
+ PASS src/router.test.js > redirects anonymous users
+ PASS src/router.test.js > preserves query params
+ PASS src/router.test.js > restores scroll position
+ PASS src/router.test.js > handles missing routes
+ PASS src/cache.test.js > hydrates from local storage
+ PASS src/cache.test.js > evicts stale values
+ PASS src/cache.test.js > serializes invoice totals
+ PASS src/cache.test.js > ignores corrupt payloads
+ PASS src/export.test.js > writes csv header
+ PASS src/export.test.js > writes csv rows
+ PASS src/export.test.js > escapes commas
+ PASS src/export.test.js > escapes quotes
+ PASS src/import.test.js > imports customer csv rows
+ PASS src/import.test.js > imports invoice csv rows
+ PASS src/import.test.js > rejects missing customer ids
+ PASS src/import.test.js > reports malformed date cells
+ PASS src/webhook.test.js > accepts valid stripe signature
+ PASS src/webhook.test.js > rejects invalid stripe signature
+ PASS src/webhook.test.js > retries timeout delivery
+ PASS src/webhook.test.js > stores delivery audit record
+ PASS src/permissions.test.js > allows admin refund
+ PASS src/permissions.test.js > blocks viewer refund
+ PASS src/permissions.test.js > writes permission denial event
+ PASS src/permissions.test.js > hides restricted fields
+Test Files 1 failed | 42 passed (43)
+Tests 1 failed | 287 passed (288)
+Duration 2.41s
