@@ -1,0 +1,9 @@
+{
+  "name": "tokenslim",
+  "version": "0.1.0",
+  "description": "Input-token compressor for Claude Code. Compresses tool results (Bash/Read/Grep) before they enter model context via deterministic, cache-safe heuristics. Zero dependencies.",
+  "author": {
+    "name": "Alil Kuizon"
+  },
+  "keywords": ["tokens", "compression", "cost", "context", "hooks"]
+}

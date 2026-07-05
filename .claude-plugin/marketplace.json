@@ -1,0 +1,13 @@
+{
+  "name": "tokenslim",
+  "owner": {
+    "name": "Alil Kuizon"
+  },
+  "plugins": [
+    {
+      "name": "tokenslim",
+      "source": "./",
+      "description": "Input-token compressor: shrinks Bash/Read/Grep tool results before they enter model context. Deterministic, cache-safe, zero dependencies."
+    }
+  ]
+}
