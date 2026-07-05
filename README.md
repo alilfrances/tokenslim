@@ -1,6 +1,6 @@
 # tokenslim
 
-**Input-token compressor for Claude Code.** Shrinks tool results — Bash output, file
+**Input-token compressor for Claude Code and Codex.** Shrinks tool results — Bash output, file
 reads, grep results — *before* they enter the model's context. Deterministic, prompt-cache
 safe, zero dependencies, fail-open.
 
@@ -27,7 +27,9 @@ caveman makes the model say less, tokenslim makes it *read* less.
 
 ## Install
 
-Requires Claude Code ≥ 1.0 and Node 18+ (Claude Code already requires Node — no new deps).
+Requires Node 18+ (Claude Code and Codex already require Node — no new deps).
+
+### Claude Code
 
 **Option A — try it for one session:**
 
@@ -50,7 +52,22 @@ claude plugin marketplace add alilfrances/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
-**Optional statusline** (context % + live savings) — add to `~/.claude/settings.json`:
+### Codex
+
+This repo includes a Codex plugin manifest at `.codex-plugin/plugin.json` and a local
+marketplace file at `.agents/plugins/marketplace.json`.
+
+```bash
+git clone https://github.com/alilfrances/tokenslim.git
+codex plugin marketplace add /path/to/tokenslim
+codex plugin add tokenslim@tokenslim-local
+```
+
+Then restart Codex. The bundled `PostToolUse` hooks live in `hooks/hooks.json`;
+Codex may ask you to review and trust them through `/hooks` before they run.
+
+**Claude Code optional statusline** (context % + live savings) — add to
+`~/.claude/settings.json`:
 
 ```json
 {
@@ -63,6 +80,11 @@ claude plugin install tokenslim@tokenslim
 
 (Adjust the path to wherever the plugin is installed; with a git clone, point directly at
 `scripts/statusline.mjs` in the clone.)
+
+**Codex statusline:** Codex currently exposes built-in footer items through `/statusline`
+or `tui.status_line` in `~/.codex/config.toml`; it does not use Claude Code's
+custom command statusline format. Use `/tokenslim:tokenstats` to view measured
+tokenslim savings inside Codex.
 
 ## What it does
 

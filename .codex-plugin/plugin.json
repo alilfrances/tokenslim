@@ -1,0 +1,35 @@
+{
+  "name": "tokenslim",
+  "version": "0.1.0",
+  "description": "Input-token compressor for Claude Code and Codex. Compresses Bash, Read, Grep, and Glob tool results before they enter model context via deterministic, cache-safe heuristics.",
+  "author": {
+    "name": "Alil Kuizon"
+  },
+  "homepage": "https://github.com/alilfrances/tokenslim",
+  "repository": "https://github.com/alilfrances/tokenslim",
+  "license": "MIT",
+  "keywords": [
+    "tokens",
+    "compression",
+    "cost",
+    "context",
+    "hooks",
+    "codex"
+  ],
+  "interface": {
+    "displayName": "tokenslim",
+    "shortDescription": "Compress noisy tool output before it enters Codex context",
+    "longDescription": "tokenslim bundles PostToolUse hooks for Bash, Read, Grep, and Glob. It uses deterministic, fail-open heuristics to reduce repeated logs, repeated reads, and large search results while preserving failing test names, errors, paths, and other high-signal details.",
+    "developerName": "Alil Kuizon",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "brandColor": "#2563EB",
+    "defaultPrompt": [
+      "Compress noisy tool output in this repo",
+      "Show this session's token savings"
+    ]
+  }
+}
