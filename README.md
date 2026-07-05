@@ -60,7 +60,7 @@ marketplace file at `.agents/plugins/marketplace.json`.
 ```bash
 git clone https://github.com/alilfrances/tokenslim.git
 codex plugin marketplace add /path/to/tokenslim
-codex plugin add tokenslim@tokenslim-local
+codex plugin add tokenslim@tokenslim
 ```
 
 Then restart Codex. The bundled `PostToolUse` hooks live in `hooks/hooks.json`;

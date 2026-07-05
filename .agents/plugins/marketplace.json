@@ -1,7 +1,7 @@
 {
-  "name": "tokenslim-local",
+  "name": "tokenslim",
   "interface": {
-    "displayName": "tokenslim local"
+    "displayName": "tokenslim"
   },
   "plugins": [
     {

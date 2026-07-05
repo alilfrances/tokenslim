@@ -25,11 +25,11 @@ test('Codex plugin manifest declares required metadata without unsupported hook 
   assert.ok(manifest.interface.capabilities.includes('Interactive'));
 });
 
-test('Codex local marketplace points at the plugin root', () => {
+test('Codex marketplace points at the plugin root', () => {
   const marketplace = readJson('.agents/plugins/marketplace.json');
   const entry = marketplace.plugins.find((plugin) => plugin.name === 'tokenslim');
 
-  assert.equal(marketplace.name, 'tokenslim-local');
+  assert.equal(marketplace.name, 'tokenslim');
   assert.ok(entry);
   assert.deepEqual(entry.source, { source: 'local', path: './' });
   assert.equal(entry.policy.installation, 'AVAILABLE');
