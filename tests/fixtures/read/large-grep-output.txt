@@ -1,0 +1,15 @@
+src/big-file.ts:1:  const value1 = compute(1);
+src/big-file.ts:2:  const value2 = compute(2);
+src/big-file.ts:3:  const value3 = compute(3);
+src/big-file.ts:4:  const value4 = compute(4);
+src/big-file.ts:5:  const value5 = compute(5);
+src/big-file.ts:6:  const value6 = compute(6);
+src/big-file.ts:7:  const value7 = compute(7);
+src/big-file.ts:8:  const value8 = compute(8);
+src/other-file.ts:1:  import { thing } from "./thing";
+src/other-file.ts:1:  import { thing } from "./thing";
+src/third-file.ts:1:  console.log(1);
+src/third-file.ts:2:  console.log(2);
+src/third-file.ts:3:  console.log(3);
+src/third-file.ts:4:  console.log(4);
+src/third-file.ts:5:  console.log(5);
