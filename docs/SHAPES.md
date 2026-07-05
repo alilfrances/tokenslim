@@ -6,8 +6,9 @@ the substituted content).
 
 Codex compatibility note: current Codex PostToolUse docs do not document structured
 `updatedToolOutput` replacement. tokenslim keeps these mirrored shapes for Claude Code,
-then renders Codex replacements as compact text through the documented `continue: false`
-PostToolUse path.
+then uses the documented Codex `continue: false` PostToolUse path to suppress the
+original tool result with short stop text and send compact output via
+`hookSpecificOutput.additionalContext`.
 
 ## Bash
 

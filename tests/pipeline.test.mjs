@@ -156,7 +156,7 @@ test('entrypoint passes through small output and disabled bash output', () => {
   assert.equal(disabled.stdout, '');
 });
 
-test('Bash entrypoint emits Codex continue:false replacement text in Codex runtime', () => {
+test('Bash entrypoint emits short Codex stop text and compressed additional context', () => {
   const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
   const payload = JSON.stringify({
     session_id: 's-codex-bash',
@@ -175,9 +175,11 @@ test('Bash entrypoint emits Codex continue:false replacement text in Codex runti
   assert.equal(result.status, 0);
   const out = JSON.parse(result.stdout);
   assert.equal(out.continue, false);
-  assert.equal(out.hookSpecificOutput, undefined);
-  assert.match(out.stopReason, /^\[tokenslim: compressed Bash output\]/);
-  assert.match(out.stopReason, /\[tokenslim: 6 similar lines collapsed\]/);
+  assert.equal(out.stopReason, 'Token Slim compacted Bash output');
+  assert.doesNotMatch(out.stopReason, /similar lines collapsed/);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Bash output\]/);
+  assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 6 similar lines collapsed\]/);
 });
 
 test('Bash entrypoint compresses Codex string tool_response payloads', () => {
@@ -199,6 +201,9 @@ test('Bash entrypoint compresses Codex string tool_response payloads', () => {
   assert.equal(result.status, 0);
   const out = JSON.parse(result.stdout);
   assert.equal(out.continue, false);
-  assert.match(out.stopReason, /^\[tokenslim: compressed Bash output\]/);
-  assert.match(out.stopReason, /\[tokenslim: 120 similar lines collapsed\]/);
+  assert.equal(out.stopReason, 'Token Slim compacted Bash output');
+  assert.doesNotMatch(out.stopReason, /similar lines collapsed/);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Bash output\]/);
+  assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 120 similar lines collapsed\]/);
 });

@@ -92,7 +92,8 @@ this checkout).
 
 Three `PostToolUse` hooks intercept tool results and replace them with compressed
 versions before the model ever sees them. Claude Code receives structured
-`updatedToolOutput`; Codex receives documented `continue: false` replacement text:
+`updatedToolOutput`; Codex receives a short `continue: false` stop message while
+the compressed output is added through `hookSpecificOutput.additionalContext`:
 
 - **Bash** — strips ANSI codes, progress bars/spinners, `\r`-overwritten lines; collapses
   repeated log lines (timestamp/id-normalized fingerprinting); summarizes test-runner
@@ -139,8 +140,8 @@ was compressed.
   than mangled — compression below 10% savings is skipped entirely.
 - **Zero runtime dependencies.** Plain Node scripts, no model, no network, <50ms per hook.
 - **Runtime-compatible hook output.** Claude Code gets the original structured
-  replacement shape. Codex gets a compact text replacement using the documented
-  `PostToolUse` `continue: false` path.
+  replacement shape. Codex gets a short `PostToolUse` `continue: false`
+  replacement plus compact output in `additionalContext`.
 
 ## How savings are measured
 

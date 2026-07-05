@@ -9,8 +9,9 @@ caveman plugin (output-side compression). Zero runtime dependencies, determinist
 ## Why this design (research-backed)
 
 - Claude Code PostToolUse hooks support `updatedToolOutput`, which **replaces** the tool
-  result the model sees. Codex PostToolUse uses the documented `continue: false` replacement
-  text path, so the hook response must adapt by runtime. Bash output shape is documented
+  result the model sees. Codex PostToolUse uses the documented `continue: false` path
+  to replace the original tool result and `additionalContext` for compact model-visible
+  output, so the hook response must adapt by runtime. Bash output shape is documented
   (`{stdout, stderr, interrupted, isImage}`); Read/Grep shapes are undocumented and must be
   discovered empirically (wrong shape = silently ignored).
 - Comparable heuristic tools (RTK, chop) report 50–90% reduction on bash/build/test output;
@@ -36,7 +37,8 @@ caveman plugin (output-side compression). Zero runtime dependencies, determinist
    Per-session JSON at `~/.cache/tokenslim/<session_id>.json`; bytes in/out per hook fire +
    read-hash table. Ledger I/O never affects compressed content (determinism preserved).
 5. **Hook output adapter** (`scripts/lib/hook-output.mjs`)
-   Emits Claude Code structured replacements or Codex `continue: false` text replacements.
+   Emits Claude Code structured replacements or Codex short stop text plus compact
+   `additionalContext`.
 6. **Stats report** (`commands/tokenstats.md` for Claude Code + `scripts/stats.mjs`
    for direct/Codex use) — measured savings report.
 7. **Statusline** (`scripts/statusline.mjs`) — context % + tokens saved (opt-in via settings).

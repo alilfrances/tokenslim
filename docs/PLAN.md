@@ -14,7 +14,7 @@
 - stdout on compression for Claude Code: JSON
   `{ "hookSpecificOutput": { "hookEventName": "PostToolUse", "updatedToolOutput": <same shape as tool_response, compressed> } }`
 - stdout on compression for Codex: JSON
-  `{ "continue": false, "stopReason": "[tokenslim: compressed <tool> output]\n<compressed text>" }`
+  `{ "continue": false, "stopReason": "Token Slim compacted <tool> output", "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": "[tokenslim: compressed <tool> output]\n<compressed text>" } }`
 - stdout on pass-through (too small / disabled / error): **nothing**, exit 0. Never exit non-zero.
 - Bash `tool_response` shape: Claude Code uses `{ stdout, stderr, interrupted, isImage }`
   and Codex CLI can send plain text. Object responses compress `stdout`/`stderr` and
