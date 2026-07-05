@@ -14,6 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { loadState, saveState, recordSavings } from './lib/state.mjs';
+import { postToolUseOutput } from './lib/hook-output.mjs';
 
 const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
 
@@ -136,7 +137,8 @@ function groupFilenames(filenames) {
   });
 }
 
-function recordAndEmit(sessionId, updatedToolOutput, bytesIn, bytesOut) {
+function recordAndEmit(payload, updatedToolOutput, bytesIn, bytesOut) {
+  const sessionId = payload && payload.session_id;
   try {
     const state = loadState(sessionId);
     // Both Grep and Glob roll up under a single "Grep" ledger bucket per spec.
@@ -146,13 +148,13 @@ function recordAndEmit(sessionId, updatedToolOutput, bytesIn, bytesOut) {
     // ledger is best-effort; never block the compressed output
   }
   process.stdout.write(
-    JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput } })
+    JSON.stringify(postToolUseOutput(payload, updatedToolOutput))
   );
 }
 
 // Glob: no text field, so it's handled separately from the locateText/content path.
 // Returns true if it handled (emitted or intentionally passed through) the response.
-function tryHandleGlob(toolResponse, sessionId) {
+function tryHandleGlob(payload, toolResponse) {
   if (!toolResponse || typeof toolResponse !== 'object' || !Array.isArray(toolResponse.filenames)) {
     return false;
   }
@@ -166,7 +168,7 @@ function tryHandleGlob(toolResponse, sessionId) {
   if (ratio < 0.1) return true;
 
   const updatedToolOutput = { ...toolResponse, filenames: grouped };
-  recordAndEmit(sessionId, updatedToolOutput, origSerialized.length, newSerialized.length);
+  recordAndEmit(payload, updatedToolOutput, origSerialized.length, newSerialized.length);
   return true;
 }
 
@@ -185,7 +187,7 @@ function main(input) {
   const sessionId = payload && payload.session_id;
 
   if (toolName === 'Glob') {
-    tryHandleGlob(toolResponse, sessionId);
+    tryHandleGlob(payload, toolResponse);
     return;
   }
 
@@ -202,7 +204,7 @@ function main(input) {
   if (ratio < 0.1) return;
 
   const updatedToolOutput = locator.set(compressed);
-  recordAndEmit(sessionId, updatedToolOutput, text.length, compressed.length);
+  recordAndEmit(payload, updatedToolOutput, text.length, compressed.length);
 }
 
 try {

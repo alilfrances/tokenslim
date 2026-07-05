@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compressBashOutput } from './lib/pipeline.mjs';
+import { postToolUseOutput } from './lib/hook-output.mjs';
 
 async function readStdin() {
   let input = '';
@@ -39,8 +40,9 @@ async function main() {
     const raw = await readStdin();
     const payload = JSON.parse(raw);
     const response = payload?.tool_response;
-    const stdout = String(response?.stdout ?? '');
-    const stderr = String(response?.stderr ?? '');
+    const stringResponse = typeof response === 'string';
+    const stdout = stringResponse ? response : String(response?.stdout ?? '');
+    const stderr = stringResponse ? '' : String(response?.stderr ?? '');
     const minChars = Number.parseInt(process.env.TOKENSLIM_MIN_CHARS || '500', 10);
     const threshold = Number.isFinite(minChars) ? minChars : 500;
     if (stdout.length + stderr.length < threshold) return;
@@ -51,17 +53,15 @@ async function main() {
     const bytesOut = compressedStdout.stats.bytesOut + compressedStderr.stats.bytesOut;
     if (bytesIn === 0 || bytesOut / bytesIn > 0.9) return;
 
-    const output = {
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        updatedToolOutput: {
+    const updatedToolOutput = stringResponse
+      ? compressedStdout.text
+      : {
           stdout: compressedStdout.text,
           stderr: compressedStderr.text,
           interrupted: response?.interrupted,
           isImage: response?.isImage,
-        },
-      },
-    };
+        };
+    const output = postToolUseOutput(payload, updatedToolOutput);
     process.stdout.write(JSON.stringify(output));
     await recordSavingsBestEffort(payload?.session_id, bytesIn, bytesOut);
   } catch {

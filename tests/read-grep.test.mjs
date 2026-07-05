@@ -225,6 +225,40 @@ test('Read: TOKENSLIM_DISABLE=read suppresses output entirely', () => {
   });
 });
 
+test('Read: Codex runtime emits continue:false replacement text', () => {
+  withTempCache((cacheDir) => {
+    const content = fsReadFileSync(FIXTURE_SOURCE, 'utf8');
+    const payload = {
+      session_id: 'sess-read-codex',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Read',
+      turn_id: 'turn-codex',
+      tool_input: { file_path: FIXTURE_SOURCE },
+      tool_response: {
+        type: 'text',
+        file: {
+          filePath: FIXTURE_SOURCE,
+          content,
+          numLines: content.split('\n').length,
+          startLine: 1,
+          totalLines: content.split('\n').length,
+        },
+      },
+    };
+    const result = run(READ_SCRIPT, payload, {
+      XDG_CACHE_HOME: cacheDir,
+      TOKENSLIM_MIN_CHARS: '10',
+      TOKENSLIM_HOOK_RUNTIME: 'codex',
+    });
+    assert.equal(result.status, 0);
+    const out = parseOutput(result);
+    assert.equal(out.continue, false);
+    assert.equal(out.hookSpecificOutput, undefined);
+    assert.match(out.stopReason, /^\[tokenslim: compressed Read output\]/);
+    assert.match(out.stopReason, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  });
+});
+
 // ---------- Grep / Glob ----------
 
 test('Grep: confirmed content-mode shape dedups exact lines and collapses repeated matches', () => {
@@ -308,6 +342,30 @@ test('Grep: TOKENSLIM_DISABLE=grep suppresses output entirely', () => {
     };
     const result = run(GREP_SCRIPT, payload, { XDG_CACHE_HOME: cacheDir, TOKENSLIM_DISABLE: 'grep' });
     assert.equal(result.stdout, '');
+  });
+});
+
+test('Grep: Codex runtime emits continue:false replacement text', () => {
+  withTempCache((cacheDir) => {
+    const content = fsReadFileSync(FIXTURE_GREP, 'utf8');
+    const payload = {
+      session_id: 'sess-grep-codex',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Grep',
+      turn_id: 'turn-codex',
+      tool_input: {},
+      tool_response: { mode: 'content', numFiles: 3, filenames: ['a', 'b', 'c'], content, numLines: content.split('\n').length },
+    };
+    const result = run(GREP_SCRIPT, payload, {
+      XDG_CACHE_HOME: cacheDir,
+      TOKENSLIM_HOOK_RUNTIME: 'codex',
+    });
+    assert.equal(result.status, 0);
+    const out = parseOutput(result);
+    assert.equal(out.continue, false);
+    assert.equal(out.hookSpecificOutput, undefined);
+    assert.match(out.stopReason, /^\[tokenslim: compressed Grep output\]/);
+    assert.match(out.stopReason, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
   });
 });
 

@@ -37,26 +37,48 @@ test('Codex local marketplace points at the plugin root', () => {
   assert.equal(entry.category, 'Developer Tools');
 });
 
-test('hook commands run from the plugin root when Claude-specific env vars are absent', () => {
+test('hook commands prefer Claude root, then Codex root, then local root', () => {
   const hooks = readJson('hooks/hooks.json');
   const groups = hooks.hooks.PostToolUse.flatMap((group) => group.hooks);
   const env = { ...process.env };
+  delete env.PLUGIN_ROOT;
   delete env.CLAUDE_PLUGIN_ROOT;
   delete env.CODEX_PLUGIN_ROOT;
 
   for (const hook of groups) {
-    const result = spawnSync(hook.command, {
+    assert.match(hook.command, /\$\{CLAUDE_PLUGIN_ROOT:-\$\{PLUGIN_ROOT:-\.\}\}/);
+    assert.doesNotMatch(hook.command, /CODEX_PLUGIN_ROOT/);
+    const localResult = spawnSync(hook.command, {
       cwd: root,
       env,
       input: 'not json',
       shell: true,
       encoding: 'utf8',
     });
-    assert.equal(result.status, 0, `${hook.command}\nstderr:\n${result.stderr}`);
+    assert.equal(localResult.status, 0, `${hook.command}\nstderr:\n${localResult.stderr}`);
+
+    const claudeResult = spawnSync(hook.command, {
+      cwd: '/tmp',
+      env: { ...env, CLAUDE_PLUGIN_ROOT: root, PLUGIN_ROOT: '/tmp/not-tokenslim' },
+      input: 'not json',
+      shell: true,
+      encoding: 'utf8',
+    });
+    assert.equal(claudeResult.status, 0, `${hook.command}\nstderr:\n${claudeResult.stderr}`);
+
+    const codexResult = spawnSync(hook.command, {
+      cwd: '/tmp',
+      env: { ...env, PLUGIN_ROOT: root },
+      input: 'not json',
+      shell: true,
+      encoding: 'utf8',
+    });
+    assert.equal(codexResult.status, 0, `${hook.command}\nstderr:\n${codexResult.stderr}`);
   }
 });
 
-test('tokenstats command can resolve scripts outside Claude Code', () => {
+test('tokenstats command is Claude/local only, not a Codex slash command', () => {
   const command = readFileSync(join(root, 'commands', 'tokenstats.md'), 'utf8');
-  assert.match(command, /\$\{CLAUDE_PLUGIN_ROOT:-\$\{CODEX_PLUGIN_ROOT:-\.\}\}/);
+  assert.match(command, /\$\{CLAUDE_PLUGIN_ROOT:-\.\}/);
+  assert.doesNotMatch(command, /CODEX_PLUGIN_ROOT/);
 });

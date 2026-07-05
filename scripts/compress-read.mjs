@@ -8,6 +8,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { loadState, saveState, recordSavings, readCache } from './lib/state.mjs';
+import { postToolUseOutput } from './lib/hook-output.mjs';
 
 const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
 
@@ -142,9 +143,7 @@ function main(input) {
       const updatedToolOutput = locator.set(stub);
       recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: stub.length });
       saveState(sessionId, state);
-      process.stdout.write(
-        JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput } })
-      );
+      process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
       return;
     }
   }
@@ -162,9 +161,7 @@ function main(input) {
     recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: slimmed.length });
     stateDirty = true;
     saveState(sessionId, state);
-    process.stdout.write(
-      JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', updatedToolOutput } })
-    );
+    process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
     return;
   }
 

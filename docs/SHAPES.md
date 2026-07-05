@@ -4,6 +4,30 @@ Captured via a logging PostToolUse hook + `claude -p` probe. Replacement via
 `updatedToolOutput` with a mirrored shape **verified working for Read** (model received
 the substituted content).
 
+Codex compatibility note: current Codex PostToolUse docs do not document structured
+`updatedToolOutput` replacement. tokenslim keeps these mirrored shapes for Claude Code,
+then renders Codex replacements as compact text through the documented `continue: false`
+PostToolUse path.
+
+## Bash
+
+Claude Code shape:
+
+```json
+{
+  "stdout": "command stdout",
+  "stderr": "command stderr",
+  "interrupted": false,
+  "isImage": false
+}
+```
+
+Codex CLI shape observed via `codex exec --dangerously-bypass-hook-trust`:
+
+```json
+"command stdout as a plain string"
+```
+
 ## Read
 
 ```json

@@ -155,3 +155,50 @@ test('entrypoint passes through small output and disabled bash output', () => {
   assert.equal(disabled.status, 0);
   assert.equal(disabled.stdout, '');
 });
+
+test('Bash entrypoint emits Codex continue:false replacement text in Codex runtime', () => {
+  const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
+  const payload = JSON.stringify({
+    session_id: 's-codex-bash',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    turn_id: 'turn-codex',
+    tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
+  });
+  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    cwd: root,
+    input: payload,
+    encoding: 'utf8',
+    env: { ...process.env, TOKENSLIM_MIN_CHARS: '10', TOKENSLIM_HOOK_RUNTIME: 'codex' },
+  });
+
+  assert.equal(result.status, 0);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continue, false);
+  assert.equal(out.hookSpecificOutput, undefined);
+  assert.match(out.stopReason, /^\[tokenslim: compressed Bash output\]/);
+  assert.match(out.stopReason, /\[tokenslim: 6 similar lines collapsed\]/);
+});
+
+test('Bash entrypoint compresses Codex string tool_response payloads', () => {
+  const stdout = Array.from({ length: 120 }, (_, i) => `worker ${i + 1} processed ${i + 1} files`).join('\n');
+  const payload = JSON.stringify({
+    session_id: 's-codex-bash-string',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    turn_id: 'turn-codex',
+    tool_response: stdout,
+  });
+  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    cwd: root,
+    input: payload,
+    encoding: 'utf8',
+    env: { ...process.env, TOKENSLIM_HOOK_RUNTIME: 'codex' },
+  });
+
+  assert.equal(result.status, 0);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continue, false);
+  assert.match(out.stopReason, /^\[tokenslim: compressed Bash output\]/);
+  assert.match(out.stopReason, /\[tokenslim: 120 similar lines collapsed\]/);
+});

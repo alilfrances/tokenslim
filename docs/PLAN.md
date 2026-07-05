@@ -6,15 +6,19 @@
 |---|---|---|
 | codex agent | `scripts/lib/pipeline.mjs`, `scripts/compress-bash.mjs`, `tests/pipeline.test.mjs`, `tests/fixtures/bash/**` | Core bash-output heuristic engine + tests |
 | sonnet agent | `scripts/lib/state.mjs`, `scripts/compress-read.mjs`, `scripts/compress-grep.mjs`, `tests/state.test.mjs`, `tests/read-grep.test.mjs`, `tests/fixtures/read/**` | Dedup cache, ledger, read/grep hooks + tests |
-| main (Fable) | `.claude-plugin/plugin.json`, `hooks/hooks.json`, `commands/*`, `scripts/statusline.mjs`, `scripts/stats.mjs`, `README.md`, docs, integration, shape discovery | Scaffold, small modules, verify, integrate |
+| main (Fable) | `.claude-plugin/plugin.json`, `hooks/hooks.json`, `commands/*`, `scripts/statusline.mjs`, `scripts/stats.mjs`, `scripts/lib/hook-output.mjs`, `README.md`, docs, integration, shape discovery | Scaffold, small modules, verify, integrate |
 
 ## Hook I/O contract (all hook scripts)
 
 - stdin: JSON `{ session_id, cwd, hook_event_name: "PostToolUse", tool_name, tool_input, tool_response, tool_use_id }`
-- stdout on compression: JSON
+- stdout on compression for Claude Code: JSON
   `{ "hookSpecificOutput": { "hookEventName": "PostToolUse", "updatedToolOutput": <same shape as tool_response, compressed> } }`
+- stdout on compression for Codex: JSON
+  `{ "continue": false, "stopReason": "[tokenslim: compressed <tool> output]\n<compressed text>" }`
 - stdout on pass-through (too small / disabled / error): **nothing**, exit 0. Never exit non-zero.
-- Bash `tool_response` shape (documented): `{ stdout, stderr, interrupted, isImage }` — only compress `stdout`/`stderr`, preserve other fields verbatim.
+- Bash `tool_response` shape: Claude Code uses `{ stdout, stderr, interrupted, isImage }`
+  and Codex CLI can send plain text. Object responses compress `stdout`/`stderr` and
+  preserve other fields; string responses compress the string directly.
 - Read/Grep shape: **mirror whatever arrives** — modify only the text-bearing field(s), copy every other field byte-identical. Text-bearing field located defensively; if structure unrecognized, pass through.
 
 ## lib/pipeline.mjs contract (pure, deterministic)

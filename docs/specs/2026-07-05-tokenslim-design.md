@@ -8,9 +8,11 @@ caveman plugin (output-side compression). Zero runtime dependencies, determinist
 
 ## Why this design (research-backed)
 
-- PostToolUse hooks support `updatedToolOutput`, which **replaces** the tool result the model
-  sees. Bash output shape is documented (`{stdout, stderr, interrupted, isImage}`); Read/Grep
-  shapes are undocumented and must be discovered empirically (wrong shape = silently ignored).
+- Claude Code PostToolUse hooks support `updatedToolOutput`, which **replaces** the tool
+  result the model sees. Codex PostToolUse uses the documented `continue: false` replacement
+  text path, so the hook response must adapt by runtime. Bash output shape is documented
+  (`{stdout, stderr, interrupted, isImage}`); Read/Grep shapes are undocumented and must be
+  discovered empirically (wrong shape = silently ignored).
 - Comparable heuristic tools (RTK, chop) report 50–90% reduction on bash/build/test output;
   Microsoft context-pruning paper reports 63.9% from pruning alone. 50%+ is realistic.
 - Prompt-cache safety: compressing **at injection time** with **deterministic** output never
@@ -33,9 +35,12 @@ caveman plugin (output-side compression). Zero runtime dependencies, determinist
 4. **Savings ledger** (`scripts/lib/state.mjs`)
    Per-session JSON at `~/.cache/tokenslim/<session_id>.json`; bytes in/out per hook fire +
    read-hash table. Ledger I/O never affects compressed content (determinism preserved).
-5. **`/tokenstats`** (`commands/tokenstats.md` + `scripts/stats.mjs`) — measured savings report.
-6. **Statusline** (`scripts/statusline.mjs`) — context % + tokens saved (opt-in via settings).
-7. **`/slim-memory`** (`commands/slim-memory.md`) — mechanical CLAUDE.md/rules slimmer
+5. **Hook output adapter** (`scripts/lib/hook-output.mjs`)
+   Emits Claude Code structured replacements or Codex `continue: false` text replacements.
+6. **Stats report** (`commands/tokenstats.md` for Claude Code + `scripts/stats.mjs`
+   for direct/Codex use) — measured savings report.
+7. **Statusline** (`scripts/statusline.mjs`) — context % + tokens saved (opt-in via settings).
+8. **`/slim-memory`** (`commands/slim-memory.md`) — mechanical CLAUDE.md/rules slimmer
    (dedup, markdown-noise strip; not caveman-speak).
 
 ## Safety rails

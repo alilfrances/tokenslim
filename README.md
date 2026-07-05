@@ -83,13 +83,16 @@ Codex may ask you to review and trust them through `/hooks` before they run.
 
 **Codex statusline:** Codex currently exposes built-in footer items through `/statusline`
 or `tui.status_line` in `~/.codex/config.toml`; it does not use Claude Code's
-custom command statusline format. Use `/tokenslim:tokenstats` to view measured
-tokenslim savings inside Codex.
+custom command statusline format. Codex also does not register this plugin's
+Claude-style `commands/` files as slash commands. To view measured savings in Codex,
+run `node /path/to/tokenslim/scripts/stats.mjs` (or `node scripts/stats.mjs` from
+this checkout).
 
 ## What it does
 
-Three `PostToolUse` hooks intercept tool results and replace them (via
-`updatedToolOutput`) with compressed versions before the model ever sees them:
+Three `PostToolUse` hooks intercept tool results and replace them with compressed
+versions before the model ever sees them. Claude Code receives structured
+`updatedToolOutput`; Codex receives documented `continue: false` replacement text:
 
 - **Bash** — strips ANSI codes, progress bars/spinners, `\r`-overwritten lines; collapses
   repeated log lines (timestamp/id-normalized fingerprinting); summarizes test-runner
@@ -108,8 +111,9 @@ was compressed.
 
 ## Commands
 
-- **`/tokenslim:tokenstats`** — measured savings this session: bytes in/out per tool,
-  estimated tokens and dollars saved. Real measurements from the ledger, not estimates.
+- **`/tokenslim:tokenstats`** (Claude Code) — measured savings this session: bytes
+  in/out per tool, estimated tokens and dollars saved. Real measurements from the
+  ledger, not estimates. In Codex, run `node /path/to/tokenslim/scripts/stats.mjs`.
 - **`/tokenslim:slim-memory <file>`** — mechanical CLAUDE.md/rules slimmer: dedups
   redundant rules, strips markdown noise, keeps every directive/path/command byte-identical.
   Shows a preview and asks before writing; original backed up to `<file>.original.md`.
@@ -134,12 +138,16 @@ was compressed.
   comments/docstrings. Dense output (unique lines, e.g. `git log`) is left alone rather
   than mangled — compression below 10% savings is skipped entirely.
 - **Zero runtime dependencies.** Plain Node scripts, no model, no network, <50ms per hook.
+- **Runtime-compatible hook output.** Claude Code gets the original structured
+  replacement shape. Codex gets a compact text replacement using the documented
+  `PostToolUse` `continue: false` path.
 
 ## How savings are measured
 
 Each hook records bytes-in/bytes-out to a per-session ledger at
-`~/.cache/tokenslim/<session_id>.json`. `/tokenslim:tokenstats` and the statusline read
-that ledger. Token estimates use ~3 chars/token (code-like content); cost estimates use
+`~/.cache/tokenslim/<session_id>.json`. `/tokenslim:tokenstats` in Claude Code,
+`scripts/stats.mjs`, and the statusline read that ledger. Token estimates use
+~3 chars/token (code-like content); cost estimates use
 $3/MTok input pricing — both assumptions are documented in the code.
 
 ## Research this is built on
@@ -160,12 +168,13 @@ $3/MTok input pricing — both assumptions are documented in the code.
 ## Development
 
 ```bash
-node --test tests/*.test.mjs   # 36 tests: rules, determinism, fail-open, ratio floors
+node --test tests/*.test.mjs   # 44 tests: rules, determinism, fail-open, ratio floors
 ```
 
 Repo layout: `scripts/lib/pipeline.mjs` (pure compression rules), `scripts/lib/state.mjs`
 (ledger + read cache), `scripts/compress-{bash,read,grep}.mjs` (hook entrypoints),
-`hooks/hooks.json` (wiring), `docs/` (design spec, plan, discovered tool_response shapes).
+`hooks/hooks.json` (wiring), `docs/` (design spec, plan, discovered tool_response shapes),
+`scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
 
 ## FAQ
 
