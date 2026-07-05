@@ -38,7 +38,7 @@ claude --plugin-dir /path/to/tokenslim
 **Option B — install permanently from a local clone:**
 
 ```bash
-git clone https://github.com/YOURUSER/tokenslim.git
+git clone https://github.com/alilfrances/tokenslim.git
 claude plugin marketplace add /path/to/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
@@ -46,7 +46,7 @@ claude plugin install tokenslim@tokenslim
 **Option C — from GitHub (once published):**
 
 ```bash
-claude plugin marketplace add YOURUSER/tokenslim
+claude plugin marketplace add alilfrances/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
