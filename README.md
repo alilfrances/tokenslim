@@ -43,7 +43,7 @@ claude plugin marketplace add /path/to/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
-**Option C — from GitHub (once published):**
+**Option C — from GitHub (easiest):**
 
 ```bash
 claude plugin marketplace add alilfrances/tokenslim
