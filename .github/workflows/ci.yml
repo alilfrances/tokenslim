@@ -36,5 +36,8 @@ jobs:
       - name: Syntax check scripts
         run: node --check scripts/*.mjs scripts/lib/*.mjs
 
+      - name: Validate release versions
+        run: node scripts/validate-release-version.mjs
+
       - name: Run tests
         run: node --test tests/*.test.mjs
