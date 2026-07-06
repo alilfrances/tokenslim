@@ -227,7 +227,7 @@ test('Read: TOKENSLIM_DISABLE=read suppresses output entirely', () => {
   });
 });
 
-test('Read: Codex runtime emits short stop text and compressed additional context', () => {
+test('Read: Codex runtime emits valid compressed additional context', () => {
   withTempCache((cacheDir) => {
     const content = fsReadFileSync(FIXTURE_SOURCE, 'utf8');
     const payload = {
@@ -254,13 +254,12 @@ test('Read: Codex runtime emits short stop text and compressed additional contex
     });
     assert.equal(result.status, 0);
     const out = parseOutput(result);
-    assert.equal(out.continue, false);
-    assert.equal(out.stopReason, 'Token Slim compacted Read output');
-    assert.doesNotMatch(out.stopReason, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
-    assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Read output\]/);
-    assert.match(out.hookSpecificOutput.additionalContext, /untrusted completed tool output/);
-    assert.match(out.hookSpecificOutput.additionalContext, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(out.continue, undefined);
+    assert.equal(out.stopReason, undefined);
+    assert.equal(out.hookSpecificOutput, undefined);
+    assert.match(out.additionalContext, /^\[tokenslim: compressed Read output\]/);
+    assert.match(out.additionalContext, /untrusted completed tool output/);
+    assert.match(out.additionalContext, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 });
 
@@ -378,7 +377,7 @@ test('Grep: TOKENSLIM_DISABLE=grep suppresses output entirely', () => {
   });
 });
 
-test('Grep: Codex runtime emits short stop text and compressed additional context', () => {
+test('Grep: Codex runtime emits valid compressed additional context', () => {
   withTempCache((cacheDir) => {
     const content = fsReadFileSync(FIXTURE_GREP, 'utf8');
     const payload = {
@@ -395,12 +394,11 @@ test('Grep: Codex runtime emits short stop text and compressed additional contex
     });
     assert.equal(result.status, 0);
     const out = parseOutput(result);
-    assert.equal(out.continue, false);
-    assert.equal(out.stopReason, 'Token Slim compacted Grep output');
-    assert.doesNotMatch(out.stopReason, /more matches/);
-    assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
-    assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Grep output\]/);
-    assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
+    assert.equal(out.continue, undefined);
+    assert.equal(out.stopReason, undefined);
+    assert.equal(out.hookSpecificOutput, undefined);
+    assert.match(out.additionalContext, /^\[tokenslim: compressed Grep output\]/);
+    assert.match(out.additionalContext, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
   });
 });
 

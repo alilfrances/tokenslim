@@ -1,8 +1,7 @@
 // Runtime-specific PostToolUse output helpers.
 //
-// Claude Code supports structured updatedToolOutput replacement. Codex can stop
-// normal tool-result processing and add model-visible context, so keep terminal
-// stop text short while sending compact output through additionalContext.
+// Claude Code supports structured updatedToolOutput replacement. Codex accepts
+// model-visible context through top-level additionalContext.
 
 function isObject(value) {
   return value !== null && typeof value === 'object';
@@ -83,11 +82,6 @@ export function codexReplacementText(toolName, updatedToolOutput) {
   return `${label}\n${stringifyFallback(updatedToolOutput)}`;
 }
 
-function codexStopReason(toolName) {
-  const name = String(toolName || 'tool');
-  return `Token Slim compacted ${name} output`;
-}
-
 function codexAdditionalContext(toolName, updatedToolOutput) {
   const text = codexReplacementText(toolName, updatedToolOutput);
   const [label, ...body] = text.split('\n');
@@ -104,12 +98,7 @@ export function postToolUseOutput(payload, updatedToolOutput) {
   if (runtime === 'codex') {
     const toolName = payload?.tool_name;
     return {
-      continue: false,
-      stopReason: codexStopReason(toolName),
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        additionalContext: codexAdditionalContext(toolName, updatedToolOutput),
-      },
+      additionalContext: codexAdditionalContext(toolName, updatedToolOutput),
     };
   }
 
