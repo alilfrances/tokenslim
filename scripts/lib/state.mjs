@@ -26,7 +26,7 @@ function statePath(sessionId) {
 }
 
 function freshState() {
-  return { version: 1, savings: {}, reads: {} };
+  return { version: 1, savings: {}, reads: {}, diagnostics: {} };
 }
 
 function isValidState(state) {
@@ -73,6 +73,24 @@ export function recordSavings(state, { tool, bytesIn, bytesOut }) {
   return state;
 }
 
+export function recordDiagnostic(state, { tool, event, outcome }) {
+  if (!state || typeof state !== 'object') return state;
+  if (!state.diagnostics || typeof state.diagnostics !== 'object') state.diagnostics = {};
+  const toolKey = String(tool ?? 'unknown');
+  const eventKey = String(event ?? 'unknown');
+  const outcomeKey = String(outcome ?? 'unknown');
+  if (!state.diagnostics[toolKey] || typeof state.diagnostics[toolKey] !== 'object') {
+    state.diagnostics[toolKey] = {};
+  }
+  if (!state.diagnostics[toolKey][eventKey] || typeof state.diagnostics[toolKey][eventKey] !== 'object') {
+    state.diagnostics[toolKey][eventKey] = {};
+  }
+  state.diagnostics[toolKey][eventKey][outcomeKey] = (
+    Number(state.diagnostics[toolKey][eventKey][outcomeKey]) || 0
+  ) + 1;
+  return state;
+}
+
 export function readCache(state) {
   if (!state || typeof state !== 'object') state = freshState();
   if (!state.reads || typeof state.reads !== 'object') state.reads = {};
@@ -103,5 +121,12 @@ export function summarize(state) {
   const bytesSaved = totalBytesIn - totalBytesOut;
   const estTokensSaved = Math.max(0, Math.round(bytesSaved / CHARS_PER_TOKEN));
   const estCostSavedUsd = (estTokensSaved / 1_000_000) * INPUT_USD_PER_MTOK;
-  return { totalBytesIn, totalBytesOut, estTokensSaved, estCostSavedUsd, perTool };
+  return {
+    totalBytesIn,
+    totalBytesOut,
+    estTokensSaved,
+    estCostSavedUsd,
+    perTool,
+    diagnostics: (state && state.diagnostics) || {},
+  };
 }

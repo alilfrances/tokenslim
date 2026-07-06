@@ -13,7 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
-import { loadState, saveState, recordSavings } from './lib/state.mjs';
+import { loadState, saveState, recordDiagnostic, recordSavings } from './lib/state.mjs';
 import { postToolUseOutput } from './lib/hook-output.mjs';
 
 const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
@@ -22,6 +22,25 @@ function isDisabled() {
   const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
   const flags = raw.split(',').map((s) => s.trim());
   return flags.includes('grep') || flags.includes('all');
+}
+
+function eventName(payload) {
+  return payload?.hook_event_name || 'PostToolUse';
+}
+
+function diagnosticTool(payload) {
+  return payload?.tool_name === 'Glob' ? 'Glob' : 'Grep';
+}
+
+function recordDiagnosticBestEffort(payload, outcome) {
+  const sessionId = payload && payload.session_id;
+  try {
+    const state = loadState(sessionId);
+    recordDiagnostic(state, { tool: diagnosticTool(payload), event: eventName(payload), outcome });
+    saveState(sessionId, state);
+  } catch {
+    // best-effort diagnostics only
+  }
 }
 
 // Locate the text-bearing field on a Grep tool_response. Returns
@@ -141,6 +160,7 @@ function recordAndEmit(payload, updatedToolOutput, bytesIn, bytesOut) {
   const sessionId = payload && payload.session_id;
   try {
     const state = loadState(sessionId);
+    recordDiagnostic(state, { tool: diagnosticTool(payload), event: eventName(payload), outcome: 'compressed' });
     // Both Grep and Glob roll up under a single "Grep" ledger bucket per spec.
     recordSavings(state, { tool: 'Grep', bytesIn, bytesOut });
     saveState(sessionId, state);
@@ -160,12 +180,18 @@ function tryHandleGlob(payload, toolResponse) {
   }
   const filenames = toolResponse.filenames;
   const origSerialized = JSON.stringify(filenames);
-  if (origSerialized.length < MIN_CHARS || filenames.length <= 100) return true; // recognized, nothing to do
+  if (origSerialized.length < MIN_CHARS || filenames.length <= 100) {
+    recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    return true; // recognized, nothing to do
+  }
 
   const grouped = groupFilenames(filenames);
   const newSerialized = JSON.stringify(grouped);
   const ratio = (origSerialized.length - newSerialized.length) / origSerialized.length;
-  if (ratio < 0.1) return true;
+  if (ratio < 0.1) {
+    recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    return true;
+  }
 
   const updatedToolOutput = { ...toolResponse, filenames: grouped };
   recordAndEmit(payload, updatedToolOutput, origSerialized.length, newSerialized.length);
@@ -173,18 +199,24 @@ function tryHandleGlob(payload, toolResponse) {
 }
 
 function main(input) {
-  if (isDisabled()) return;
-
   let payload;
   try {
     payload = JSON.parse(input);
   } catch {
     return;
   }
+  if (isDisabled()) {
+    recordDiagnosticBestEffort(payload, 'disabled');
+    return;
+  }
+  recordDiagnosticBestEffort(payload, 'attempted');
 
   const toolResponse = payload && payload.tool_response;
   const toolName = payload && payload.tool_name;
-  const sessionId = payload && payload.session_id;
+  if (!toolResponse) {
+    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    return;
+  }
 
   if (toolName === 'Glob') {
     tryHandleGlob(payload, toolResponse);
@@ -192,16 +224,29 @@ function main(input) {
   }
 
   const locator = locateText(toolResponse);
-  if (!locator) return;
+  if (!locator) {
+    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    return;
+  }
 
   const text = locator.get();
-  if (typeof text !== 'string' || text.length < MIN_CHARS) return;
+  if (typeof text !== 'string') {
+    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    return;
+  }
+  if (text.length < MIN_CHARS) {
+    recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    return;
+  }
 
   const compressed = compressGrepText(text);
 
   const saved = text.length - compressed.length;
   const ratio = text.length > 0 ? saved / text.length : 0;
-  if (ratio < 0.1) return;
+  if (ratio < 0.1) {
+    recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    return;
+  }
 
   const updatedToolOutput = locator.set(compressed);
   recordAndEmit(payload, updatedToolOutput, text.length, compressed.length);

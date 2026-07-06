@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { join as pathJoin } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -154,6 +157,51 @@ test('entrypoint passes through small output and disabled bash output', () => {
   });
   assert.equal(disabled.status, 0);
   assert.equal(disabled.stdout, '');
+});
+
+test('Bash entrypoint records diagnostics for skipped and compressed outputs', () => {
+  const cacheRoot = mkdtempSync(pathJoin(tmpdir(), 'tokenslim-bash-diag-'));
+  try {
+    const env = { ...process.env, XDG_CACHE_HOME: cacheRoot };
+    const smallPayload = JSON.stringify({
+      session_id: 'diag-bash',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_response: { stdout: 'short', stderr: '', interrupted: false, isImage: false },
+    });
+    const small = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+      cwd: root,
+      input: smallPayload,
+      encoding: 'utf8',
+      env,
+    });
+    assert.equal(small.status, 0);
+    assert.equal(small.stdout, '');
+
+    const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
+    const largePayload = JSON.stringify({
+      session_id: 'diag-bash',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
+    });
+    const large = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+      cwd: root,
+      input: largePayload,
+      encoding: 'utf8',
+      env: { ...env, TOKENSLIM_MIN_CHARS: '10' },
+    });
+    assert.equal(large.status, 0);
+
+    const state = JSON.parse(readFileSync(pathJoin(cacheRoot, 'tokenslim', 'diag-bash.json'), 'utf8'));
+    assert.deepEqual(state.diagnostics.Bash.PostToolUse, {
+      attempted: 2,
+      skippedBelowThreshold: 1,
+      compressed: 1,
+    });
+  } finally {
+    rmSync(cacheRoot, { recursive: true, force: true });
+  }
 });
 
 test('Bash entrypoint treats Claude transcript payloads as non-blocking replacements', () => {

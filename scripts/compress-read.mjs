@@ -7,7 +7,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { loadState, saveState, recordSavings, readCache } from './lib/state.mjs';
+import { loadState, saveState, recordDiagnostic, recordSavings, readCache } from './lib/state.mjs';
 import { postToolUseOutput } from './lib/hook-output.mjs';
 
 const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
@@ -16,6 +16,16 @@ function isDisabled() {
   const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
   const flags = raw.split(',').map((s) => s.trim());
   return flags.includes('read') || flags.includes('all');
+}
+
+function recordDiagnosticBestEffort(sessionId, event, outcome) {
+  try {
+    const state = loadState(sessionId);
+    recordDiagnostic(state, { tool: 'Read', event, outcome });
+    saveState(sessionId, state);
+  } catch {
+    // best-effort diagnostics only
+  }
 }
 
 // Locate the text-bearing field inside the Read tool_response.
@@ -107,25 +117,39 @@ function sha256(text) {
 }
 
 function main(input) {
-  if (isDisabled()) return;
-
   let payload;
   try {
     payload = JSON.parse(input);
   } catch {
     return;
   }
+  const sessionId = payload && payload.session_id;
+  const event = payload?.hook_event_name || 'PostToolUse';
+  if (isDisabled()) {
+    recordDiagnosticBestEffort(sessionId, event, 'disabled');
+    return;
+  }
+  recordDiagnosticBestEffort(sessionId, event, 'attempted');
 
   const toolResponse = payload && payload.tool_response;
   const toolInput = (payload && payload.tool_input) || {};
   const filePath = toolInput.file_path || (toolResponse && toolResponse.file && toolResponse.file.filePath);
-  const sessionId = payload && payload.session_id;
 
   const locator = locateText(toolResponse);
-  if (!locator) return;
+  if (!locator) {
+    recordDiagnosticBestEffort(sessionId, event, 'unsupportedShape');
+    return;
+  }
 
   const text = locator.get();
-  if (typeof text !== 'string' || text.length < MIN_CHARS) return;
+  if (typeof text !== 'string') {
+    recordDiagnosticBestEffort(sessionId, event, 'unsupportedShape');
+    return;
+  }
+  if (text.length < MIN_CHARS) {
+    recordDiagnosticBestEffort(sessionId, event, 'skippedBelowThreshold');
+    return;
+  }
 
   const hash = sha256(text);
   const lineCount = text.split('\n').length;
@@ -141,6 +165,7 @@ function main(input) {
     if (existing && existing.hash === hash) {
       const stub = `[tokenslim] ${filePath} unchanged since previous read in this session (${existing.headerLine} lines, sha256:${hash.slice(0, 12)}). Content already in context above.`;
       const updatedToolOutput = locator.set(stub);
+      recordDiagnostic(state, { tool: 'Read', event, outcome: 'compressed' });
       recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: stub.length });
       saveState(sessionId, state);
       process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
@@ -158,6 +183,7 @@ function main(input) {
   const ratio = text.length > 0 ? saved / text.length : 0;
   if (ratio >= 0.1) {
     const updatedToolOutput = locator.set(slimmed);
+    recordDiagnostic(state, { tool: 'Read', event, outcome: 'compressed' });
     recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: slimmed.length });
     stateDirty = true;
     saveState(sessionId, state);
@@ -165,7 +191,8 @@ function main(input) {
     return;
   }
 
-  if (stateDirty) saveState(sessionId, state);
+  recordDiagnostic(state, { tool: 'Read', event, outcome: 'skippedPoorRatio' });
+  saveState(sessionId, state);
 }
 
 try {

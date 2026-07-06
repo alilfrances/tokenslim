@@ -74,6 +74,8 @@ test('Read: confirmed shape {type:"text", file:{content,...}} slims and mirrors 
     // the 4-line blank run collapsed, so line count shrank
     assert.ok(updated.file.numLines < content.split('\n').length);
     assert.equal(updated.file.numLines, updated.file.content.split('\n').length);
+    const state = JSON.parse(fsReadFileSync(join(cacheDir, 'tokenslim', 'sess-read-1.json'), 'utf8'));
+    assert.deepEqual(state.diagnostics.Read.PostToolUse, { attempted: 1, compressed: 1 });
   });
 });
 
@@ -448,5 +450,7 @@ test('savings ledger accumulates under the Grep bucket for both Grep and Glob', 
     const state = JSON.parse(fsReadFileSync(statePath, 'utf8'));
     assert.equal(state.savings.Grep.events, 2);
     assert.ok(state.savings.Grep.bytesIn > 0);
+    assert.deepEqual(state.diagnostics.Grep.PostToolUse, { attempted: 1, compressed: 1 });
+    assert.deepEqual(state.diagnostics.Glob.PostToolUse, { attempted: 1, compressed: 1 });
   });
 });

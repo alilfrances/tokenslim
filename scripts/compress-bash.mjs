@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { compressBashOutput } from './lib/pipeline.mjs';
 import { postToolUseOutput } from './lib/hook-output.mjs';
+import { loadState, recordDiagnostic, recordSavings, saveState } from './lib/state.mjs';
 
 async function readStdin() {
   let input = '';
@@ -20,15 +18,12 @@ function disabled() {
   return flags.includes('all') || flags.includes('bash');
 }
 
-async function recordSavingsBestEffort(sessionId, bytesIn, bytesOut) {
+function recordLedgerBestEffort(sessionId, event, outcome, bytesIn = 0, bytesOut = 0) {
   try {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const statePath = join(here, 'lib', 'state.mjs');
-    if (!existsSync(statePath)) return;
-    const stateModule = await import('./lib/state.mjs');
-    const state = stateModule.loadState?.(sessionId);
-    stateModule.recordSavings?.(state, { tool: 'Bash', bytesIn, bytesOut });
-    stateModule.saveState?.(sessionId, state);
+    const state = loadState(sessionId);
+    recordDiagnostic(state, { tool: 'Bash', event, outcome });
+    if (outcome === 'compressed') recordSavings(state, { tool: 'Bash', bytesIn, bytesOut });
+    saveState(sessionId, state);
   } catch {
     // best-effort ledger only
   }
@@ -36,22 +31,33 @@ async function recordSavingsBestEffort(sessionId, bytesIn, bytesOut) {
 
 async function main() {
   try {
-    if (disabled()) return;
     const raw = await readStdin();
     const payload = JSON.parse(raw);
+    const event = payload?.hook_event_name || 'PostToolUse';
+    if (disabled()) {
+      recordLedgerBestEffort(payload?.session_id, event, 'disabled');
+      return;
+    }
+    recordLedgerBestEffort(payload?.session_id, event, 'attempted');
     const response = payload?.tool_response;
     const stringResponse = typeof response === 'string';
     const stdout = stringResponse ? response : String(response?.stdout ?? '');
     const stderr = stringResponse ? '' : String(response?.stderr ?? '');
     const minChars = Number.parseInt(process.env.TOKENSLIM_MIN_CHARS || '500', 10);
     const threshold = Number.isFinite(minChars) ? minChars : 500;
-    if (stdout.length + stderr.length < threshold) return;
+    if (stdout.length + stderr.length < threshold) {
+      recordLedgerBestEffort(payload?.session_id, event, 'skippedBelowThreshold');
+      return;
+    }
 
     const compressedStdout = compressBashOutput(stdout);
     const compressedStderr = compressBashOutput(stderr);
     const bytesIn = compressedStdout.stats.bytesIn + compressedStderr.stats.bytesIn;
     const bytesOut = compressedStdout.stats.bytesOut + compressedStderr.stats.bytesOut;
-    if (bytesIn === 0 || bytesOut / bytesIn > 0.9) return;
+    if (bytesIn === 0 || bytesOut / bytesIn > 0.9) {
+      recordLedgerBestEffort(payload?.session_id, event, 'skippedPoorRatio');
+      return;
+    }
 
     const updatedToolOutput = stringResponse
       ? compressedStdout.text
@@ -63,7 +69,7 @@ async function main() {
         };
     const output = postToolUseOutput(payload, updatedToolOutput);
     process.stdout.write(JSON.stringify(output));
-    await recordSavingsBestEffort(payload?.session_id, bytesIn, bytesOut);
+    recordLedgerBestEffort(payload?.session_id, event, 'compressed', bytesIn, bytesOut);
   } catch {
     // fail-open: original tool output passes through
   }

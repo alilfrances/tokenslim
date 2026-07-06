@@ -42,9 +42,30 @@ try {
   console.log('tokenslim savings (this session):');
   console.log(rows.join('\n') || '  (no compression events yet)');
   console.log(`  total  ${fmt(bytesIn)} -> ${fmt(bytesOut)} | ~${tokensSaved.toLocaleString('en-US')} tokens | ~$${costSaved.toFixed(4)} saved`);
+  const diagnosticRows = diagnosticsRows(state.diagnostics);
+  if (diagnosticRows.length > 0) {
+    console.log('tokenslim diagnostics (hook activity):');
+    console.log(diagnosticRows.join('\n'));
+  }
   console.log('  note: input tokens also recur every subsequent turn, so real savings compound.');
 } catch {
   console.log('tokenslim: no savings recorded yet this session.');
+}
+
+function diagnosticsRows(diagnostics) {
+  if (!diagnostics || typeof diagnostics !== 'object') return [];
+  const rows = [];
+  for (const [tool, events] of Object.entries(diagnostics).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!events || typeof events !== 'object') continue;
+    for (const [event, counters] of Object.entries(events).sort(([a], [b]) => a.localeCompare(b))) {
+      if (!counters || typeof counters !== 'object') continue;
+      const parts = Object.entries(counters)
+        .filter(([, value]) => Number(value) > 0)
+        .map(([name, value]) => `${name} ${Number(value)}`);
+      if (parts.length > 0) rows.push(`  ${tool.padEnd(6)} ${event.padEnd(18)} ${parts.join(', ')}`);
+    }
+  }
+  return rows;
 }
 
 function fmt(b) {

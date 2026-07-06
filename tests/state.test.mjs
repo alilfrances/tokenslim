@@ -4,7 +4,14 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { loadState, saveState, recordSavings, readCache, summarize } from '../scripts/lib/state.mjs';
+import {
+  loadState,
+  saveState,
+  recordSavings,
+  recordDiagnostic,
+  readCache,
+  summarize,
+} from '../scripts/lib/state.mjs';
 
 function withTempCache(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tokenslim-state-'));
@@ -22,7 +29,7 @@ function withTempCache(fn) {
 test('loadState returns fresh state when nothing saved yet', () => {
   withTempCache(() => {
     const state = loadState('session-abc');
-    assert.deepEqual(state, { version: 1, savings: {}, reads: {} });
+    assert.deepEqual(state, { version: 1, savings: {}, reads: {}, diagnostics: {} });
   });
 });
 
@@ -48,7 +55,7 @@ test('corrupt state file recovers to fresh state without throwing', () => {
     writeFileSync(join(cacheDir, 'broken.json'), '{ not valid json ][', 'utf8');
 
     const state = loadState('broken');
-    assert.deepEqual(state, { version: 1, savings: {}, reads: {} });
+    assert.deepEqual(state, { version: 1, savings: {}, reads: {}, diagnostics: {} });
   });
 });
 
@@ -83,6 +90,17 @@ test('recordSavings accumulates across multiple calls for the same tool', () => 
   assert.deepEqual(state.savings.Read, { events: 2, bytesIn: 300, bytesOut: 130 });
 });
 
+test('recordDiagnostic accumulates per tool, event, and outcome', () => {
+  const state = { version: 1, savings: {}, reads: {} };
+  recordDiagnostic(state, { tool: 'Bash', event: 'PostToolUse', outcome: 'attempted' });
+  recordDiagnostic(state, { tool: 'Bash', event: 'PostToolUse', outcome: 'attempted' });
+  recordDiagnostic(state, { tool: 'Bash', event: 'PostToolUse', outcome: 'compressed' });
+  recordDiagnostic(state, { tool: 'Bash', event: 'PostToolUseFailure', outcome: 'attempted' });
+
+  assert.deepEqual(state.diagnostics.Bash.PostToolUse, { attempted: 2, compressed: 1 });
+  assert.deepEqual(state.diagnostics.Bash.PostToolUseFailure, { attempted: 1 });
+});
+
 test('summarize computes totals, per-tool breakdown, tokens, and cost', () => {
   const state = { version: 1, savings: {}, reads: {} };
   recordSavings(state, { tool: 'Read', bytesIn: 3000, bytesOut: 1000 });
@@ -96,6 +114,7 @@ test('summarize computes totals, per-tool breakdown, tokens, and cost', () => {
   assert.ok(summary.estCostSavedUsd > 0);
   assert.equal(summary.perTool.Read.bytesSaved, 2000);
   assert.equal(summary.perTool.Grep.bytesSaved, 600);
+  assert.deepEqual(summary.diagnostics, {});
 });
 
 test('summarize on empty state returns zeros', () => {
@@ -106,5 +125,6 @@ test('summarize on empty state returns zeros', () => {
     estTokensSaved: 0,
     estCostSavedUsd: 0,
     perTool: {},
+    diagnostics: {},
   });
 });
