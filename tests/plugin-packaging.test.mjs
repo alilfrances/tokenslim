@@ -77,8 +77,25 @@ test('hook commands prefer Claude root, then Codex root, then local root', () =>
   }
 });
 
-test('tokenstats command is Claude/local only, not a Codex slash command', () => {
+test('tokenstats command resolves the plugin root outside the project directory', () => {
   const command = readFileSync(join(root, 'commands', 'tokenstats.md'), 'utf8');
-  assert.match(command, /\$\{CLAUDE_PLUGIN_ROOT:-\.\}/);
+  const match = command.match(/!`([^`]+)`/);
+
+  assert.ok(match);
+  assert.doesNotMatch(command, /\$\{[^}]+}/);
   assert.doesNotMatch(command, /CODEX_PLUGIN_ROOT/);
+
+  const env = { ...process.env, TOKENSLIM_PLUGIN_ROOT: root };
+  delete env.PLUGIN_ROOT;
+  delete env.CLAUDE_PLUGIN_ROOT;
+  delete env.CODEX_PLUGIN_ROOT;
+
+  const result = spawnSync(match[1], {
+    cwd: '/tmp',
+    env,
+    shell: true,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /tokenslim (savings|: no savings recorded)/);
 });
