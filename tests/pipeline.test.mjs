@@ -247,6 +247,34 @@ test('Bash entrypoint treats Claude transcript payloads as non-blocking replacem
   assert.match(out.hookSpecificOutput.updatedToolOutput.stdout, /\[tokenslim: 6 similar lines collapsed\]/);
 });
 
+test('Bash entrypoint treats Codex model payloads as Codex without turn id', () => {
+  const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
+  const payload = JSON.stringify({
+    session_id: 's-codex-no-turn',
+    cwd: '/tmp/project',
+    transcript_path: null,
+    hook_event_name: 'PostToolUse',
+    model: 'gpt-5.4',
+    tool_name: 'Bash',
+    tool_input: {},
+    tool_use_id: 'call-1',
+    tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
+  });
+  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    cwd: root,
+    input: payload,
+    encoding: 'utf8',
+    env: { ...process.env, TOKENSLIM_MIN_CHARS: '10' },
+  });
+
+  assert.equal(result.status, 0);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continue, false);
+  assert.equal(out.hookSpecificOutput.updatedToolOutput, undefined);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Bash output\]/);
+});
+
 test('Bash entrypoint emits short Codex stop text and compressed additional context', () => {
   const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
   const payload = JSON.stringify({

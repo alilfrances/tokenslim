@@ -17,7 +17,11 @@ export function detectRuntime(payload, env = process.env) {
   if (env.PLUGIN_ROOT && !isObject(payload)) return 'codex';
   if (
     isObject(payload) &&
-    ('turn_id' in payload || 'permission_mode' in payload)
+    (
+      'turn_id' in payload ||
+      'permission_mode' in payload ||
+      ('model' in payload && 'cwd' in payload && 'tool_use_id' in payload)
+    )
   ) {
     return 'codex';
   }
