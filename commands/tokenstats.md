@@ -5,7 +5,7 @@ allowed-tools: Bash(node:*)
 
 ## Savings report
 
-!`node "${CLAUDE_PLUGIN_ROOT:-.}/scripts/stats.mjs"`
+!`node "${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}/scripts/stats.mjs"`
 
 Present the report above to the user exactly as printed, in a code block. Do not
 re-derive or estimate numbers yourself — the report is the measurement. If it says no
