@@ -1,7 +1,9 @@
 // Runtime-specific PostToolUse output helpers.
 //
-// Claude Code supports structured updatedToolOutput replacement. Codex accepts
-// model-visible context through top-level additionalContext.
+// Claude Code supports structured updatedToolOutput replacement. Codex's
+// post-tool-use.command.output schema is strict (additionalProperties: false):
+// additionalContext is only valid nested inside hookSpecificOutput, and
+// updatedToolOutput is not accepted.
 
 function isObject(value) {
   return value !== null && typeof value === 'object';
@@ -11,19 +13,23 @@ export function detectRuntime(payload, env = process.env) {
   const override = String(env.TOKENSLIM_HOOK_RUNTIME || '').trim().toLowerCase();
   if (override === 'codex' || override === 'claude') return override;
 
-  if (env.CLAUDE_PLUGIN_ROOT) return 'claude';
-  if (env.PLUGIN_DATA || env.CODEX_PLUGIN_ROOT) return 'codex';
-  if (env.PLUGIN_ROOT && !isObject(payload)) return 'codex';
+  // Codex sets Claude-compat env vars (CLAUDE_PLUGIN_ROOT etc.) for installed
+  // plugin hooks, so payload shape must outrank env. Codex payloads carry
+  // turn_id and model+tool_use_id; Claude payloads carry neither.
   if (
     isObject(payload) &&
     (
       'turn_id' in payload ||
-      'permission_mode' in payload ||
       ('model' in payload && 'cwd' in payload && 'tool_use_id' in payload)
     )
   ) {
     return 'codex';
   }
+
+  if (env.CLAUDE_PLUGIN_ROOT) return 'claude';
+  if (env.PLUGIN_DATA || env.CODEX_PLUGIN_ROOT) return 'codex';
+  if (env.PLUGIN_ROOT && !isObject(payload)) return 'codex';
+  if (isObject(payload) && 'permission_mode' in payload) return 'codex';
   return 'claude';
 }
 
@@ -93,12 +99,22 @@ function codexAdditionalContext(toolName, updatedToolOutput) {
   ].join('\n').replace(/\n+$/g, '');
 }
 
+function codexStopReason(toolName) {
+  const name = String(toolName || 'tool');
+  return `Token Slim compacted ${name} output`;
+}
+
 export function postToolUseOutput(payload, updatedToolOutput) {
   const runtime = detectRuntime(payload);
   if (runtime === 'codex') {
     const toolName = payload?.tool_name;
     return {
-      additionalContext: codexAdditionalContext(toolName, updatedToolOutput),
+      continue: false,
+      stopReason: codexStopReason(toolName),
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: codexAdditionalContext(toolName, updatedToolOutput),
+      },
     };
   }
 

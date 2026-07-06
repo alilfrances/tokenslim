@@ -269,10 +269,11 @@ test('Bash entrypoint treats Codex model payloads as Codex without turn id', () 
 
   assert.equal(result.status, 0);
   const out = JSON.parse(result.stdout);
-  assert.equal(out.continue, undefined);
-  assert.equal(out.stopReason, undefined);
-  assert.equal(out.hookSpecificOutput, undefined);
-  assert.match(out.additionalContext, /^\[tokenslim: compressed Bash output\]/);
+  assert.equal(out.continue, false);
+  assert.equal(out.stopReason, 'Token Slim compacted Bash output');
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.equal(out.additionalContext, undefined);
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Bash output\]/);
 });
 
 test('Bash entrypoint emits valid Codex compressed additional context', () => {
@@ -293,11 +294,12 @@ test('Bash entrypoint emits valid Codex compressed additional context', () => {
 
   assert.equal(result.status, 0);
   const out = JSON.parse(result.stdout);
-  assert.equal(out.continue, undefined);
-  assert.equal(out.stopReason, undefined);
-  assert.equal(out.hookSpecificOutput, undefined);
-  assert.match(out.additionalContext, /^\[tokenslim: compressed Bash output\]/);
-  assert.match(out.additionalContext, /\[tokenslim: 6 similar lines collapsed\]/);
+  assert.equal(out.continue, false);
+  assert.equal(out.stopReason, 'Token Slim compacted Bash output');
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.equal(out.additionalContext, undefined);
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Bash output\]/);
+  assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 6 similar lines collapsed\]/);
 });
 
 test('Bash entrypoint compresses Codex string tool_response payloads', () => {
@@ -318,9 +320,10 @@ test('Bash entrypoint compresses Codex string tool_response payloads', () => {
 
   assert.equal(result.status, 0);
   const out = JSON.parse(result.stdout);
-  assert.equal(out.continue, undefined);
-  assert.equal(out.stopReason, undefined);
-  assert.equal(out.hookSpecificOutput, undefined);
-  assert.match(out.additionalContext, /^\[tokenslim: compressed Bash output\]/);
-  assert.match(out.additionalContext, /\[tokenslim: 120 similar lines collapsed\]/);
+  assert.equal(out.continue, false);
+  assert.equal(out.stopReason, 'Token Slim compacted Bash output');
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.equal(out.additionalContext, undefined);
+  assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Bash output\]/);
+  assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 120 similar lines collapsed\]/);
 });

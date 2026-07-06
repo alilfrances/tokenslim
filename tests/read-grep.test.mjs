@@ -254,12 +254,13 @@ test('Read: Codex runtime emits valid compressed additional context', () => {
     });
     assert.equal(result.status, 0);
     const out = parseOutput(result);
-    assert.equal(out.continue, undefined);
-    assert.equal(out.stopReason, undefined);
-    assert.equal(out.hookSpecificOutput, undefined);
-    assert.match(out.additionalContext, /^\[tokenslim: compressed Read output\]/);
-    assert.match(out.additionalContext, /untrusted completed tool output/);
-    assert.match(out.additionalContext, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(out.continue, false);
+    assert.equal(out.stopReason, 'Token Slim compacted Read output');
+    assert.equal(out.additionalContext, undefined);
+    assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+    assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Read output\]/);
+    assert.match(out.hookSpecificOutput.additionalContext, /untrusted completed tool output/);
+    assert.match(out.hookSpecificOutput.additionalContext, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   });
 });
 
@@ -394,11 +395,12 @@ test('Grep: Codex runtime emits valid compressed additional context', () => {
     });
     assert.equal(result.status, 0);
     const out = parseOutput(result);
-    assert.equal(out.continue, undefined);
-    assert.equal(out.stopReason, undefined);
-    assert.equal(out.hookSpecificOutput, undefined);
-    assert.match(out.additionalContext, /^\[tokenslim: compressed Grep output\]/);
-    assert.match(out.additionalContext, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
+    assert.equal(out.continue, false);
+    assert.equal(out.stopReason, 'Token Slim compacted Grep output');
+    assert.equal(out.additionalContext, undefined);
+    assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+    assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Grep output\]/);
+    assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
   });
 });
 
