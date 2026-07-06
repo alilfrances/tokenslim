@@ -46,7 +46,7 @@ jobs:
           shasum -a 256 dist/tokenslim-${GITHUB_REF_NAME}.tar.gz > dist/tokenslim-${GITHUB_REF_NAME}.tar.gz.sha256
 
       - name: Upload release integrity artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tokenslim-${{ github.ref_name }}
           path: dist/*
