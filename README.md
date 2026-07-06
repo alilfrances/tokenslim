@@ -73,7 +73,7 @@ Codex may ask you to review and trust them through `/hooks` before they run.
 {
   "statusLine": {
     "type": "command",
-    "command": "node ~/.claude/plugins/cache/tokenslim/tokenslim/scripts/statusline.mjs"
+    "command": "node ~/.claude/plugins/marketplaces/tokenslim/scripts/statusline.mjs"
   }
 }
 ```
