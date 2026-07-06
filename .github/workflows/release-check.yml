@@ -1,0 +1,43 @@
+name: Release Check
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run tests
+        run: node --test tests/*.test.mjs
+
+      - name: Create plugin archive
+        run: |
+          mkdir -p dist
+          tar \
+            --exclude=".git" \
+            --exclude=".github" \
+            --exclude="dist" \
+            -czf dist/tokenslim-${GITHUB_REF_NAME}.tar.gz .
+          shasum -a 256 dist/tokenslim-${GITHUB_REF_NAME}.tar.gz > dist/tokenslim-${GITHUB_REF_NAME}.tar.gz.sha256
+
+      - name: Upload release integrity artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenslim-${{ github.ref_name }}
+          path: dist/*
+          if-no-files-found: error
