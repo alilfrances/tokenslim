@@ -116,3 +116,8 @@ export function postToolUseOutput(payload, updatedToolOutput) {
     },
   };
 }
+
+export function postToolUseNoopOutput(payload) {
+  if (detectRuntime(payload) === 'codex') return {};
+  return null;
+}

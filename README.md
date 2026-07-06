@@ -143,6 +143,16 @@ was compressed.
   replacement shape. Codex gets a short `PostToolUse` `continue: false`
   replacement plus compact output in `additionalContext`.
 
+## Stacking with Cortex
+
+[Cortex](https://github.com/alilfrances/Cortex) and tokenslim are complementary and safe
+to run together: Cortex proactively *selects* which repo context enters the conversation
+(graph-ranked, token-budgeted bundles over MCP), while tokenslim reactively *compresses*
+tool results after they arrive. Cortex's MCP tool results are untouched by tokenslim —
+the PostToolUse matchers only cover Bash/Read/Grep/Glob — so the two never double-process
+the same content. If you pipe `cortex bundle` output through Bash instead of MCP, very
+large bundles (>40KB) can be head/tail truncated by tokenslim; prefer the MCP tools.
+
 ## How savings are measured
 
 Each hook records bytes-in/bytes-out to a per-session ledger at

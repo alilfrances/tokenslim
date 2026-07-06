@@ -264,6 +264,34 @@ test('Read: Codex runtime emits short stop text and compressed additional contex
   });
 });
 
+test('Read: Codex runtime emits valid no-op JSON when output is below threshold', () => {
+  withTempCache((cacheDir) => {
+    const payload = {
+      session_id: 'sess-read-codex-skip',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Read',
+      turn_id: 'turn-codex',
+      tool_input: { file_path: FIXTURE_SOURCE },
+      tool_response: {
+        type: 'text',
+        file: {
+          filePath: FIXTURE_SOURCE,
+          content: 'short',
+          numLines: 1,
+          startLine: 1,
+          totalLines: 1,
+        },
+      },
+    };
+    const result = run(READ_SCRIPT, payload, {
+      XDG_CACHE_HOME: cacheDir,
+      TOKENSLIM_HOOK_RUNTIME: 'codex',
+    });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '{}');
+  });
+});
+
 // ---------- Grep / Glob ----------
 
 test('Grep: confirmed content-mode shape dedups exact lines and collapses repeated matches', () => {
@@ -373,6 +401,28 @@ test('Grep: Codex runtime emits short stop text and compressed additional contex
     assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
     assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Grep output\]/);
     assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
+  });
+});
+
+test('Grep: Codex runtime emits valid no-op JSON when output is not worth compressing', () => {
+  withTempCache((cacheDir) => {
+    const lines = [];
+    for (let i = 0; i < 40; i++) lines.push(`src/file${i}.ts:1:  export const v${i} = ${i};`);
+    const content = lines.join('\n');
+    const payload = {
+      session_id: 'sess-grep-codex-skip',
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Grep',
+      turn_id: 'turn-codex',
+      tool_input: {},
+      tool_response: { mode: 'content', numFiles: 40, filenames: [], content, numLines: lines.length },
+    };
+    const result = run(GREP_SCRIPT, payload, {
+      XDG_CACHE_HOME: cacheDir,
+      TOKENSLIM_HOOK_RUNTIME: 'codex',
+    });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, '{}');
   });
 });
 

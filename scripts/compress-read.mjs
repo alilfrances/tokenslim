@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { loadState, saveState, recordDiagnostic, recordSavings, readCache } from './lib/state.mjs';
-import { postToolUseOutput } from './lib/hook-output.mjs';
+import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
 
 const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
 
@@ -26,6 +26,11 @@ function recordDiagnosticBestEffort(sessionId, event, outcome) {
   } catch {
     // best-effort diagnostics only
   }
+}
+
+function passThrough(payload) {
+  const output = postToolUseNoopOutput(payload);
+  if (output) process.stdout.write(JSON.stringify(output));
 }
 
 // Locate the text-bearing field inside the Read tool_response.
@@ -127,6 +132,7 @@ function main(input) {
   const event = payload?.hook_event_name || 'PostToolUse';
   if (isDisabled()) {
     recordDiagnosticBestEffort(sessionId, event, 'disabled');
+    passThrough(payload);
     return;
   }
   recordDiagnosticBestEffort(sessionId, event, 'attempted');
@@ -138,16 +144,19 @@ function main(input) {
   const locator = locateText(toolResponse);
   if (!locator) {
     recordDiagnosticBestEffort(sessionId, event, 'unsupportedShape');
+    passThrough(payload);
     return;
   }
 
   const text = locator.get();
   if (typeof text !== 'string') {
     recordDiagnosticBestEffort(sessionId, event, 'unsupportedShape');
+    passThrough(payload);
     return;
   }
   if (text.length < MIN_CHARS) {
     recordDiagnosticBestEffort(sessionId, event, 'skippedBelowThreshold');
+    passThrough(payload);
     return;
   }
 
@@ -193,6 +202,7 @@ function main(input) {
 
   recordDiagnostic(state, { tool: 'Read', event, outcome: 'skippedPoorRatio' });
   saveState(sessionId, state);
+  passThrough(payload);
 }
 
 try {

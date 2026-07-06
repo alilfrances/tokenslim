@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { compressBashOutput } from './lib/pipeline.mjs';
-import { postToolUseOutput } from './lib/hook-output.mjs';
+import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
 import { loadState, recordDiagnostic, recordSavings, saveState } from './lib/state.mjs';
 
 async function readStdin() {
@@ -29,6 +29,11 @@ function recordLedgerBestEffort(sessionId, event, outcome, bytesIn = 0, bytesOut
   }
 }
 
+function passThrough(payload) {
+  const output = postToolUseNoopOutput(payload);
+  if (output) process.stdout.write(JSON.stringify(output));
+}
+
 async function main() {
   try {
     const raw = await readStdin();
@@ -36,6 +41,7 @@ async function main() {
     const event = payload?.hook_event_name || 'PostToolUse';
     if (disabled()) {
       recordLedgerBestEffort(payload?.session_id, event, 'disabled');
+      passThrough(payload);
       return;
     }
     recordLedgerBestEffort(payload?.session_id, event, 'attempted');
@@ -47,6 +53,7 @@ async function main() {
     const threshold = Number.isFinite(minChars) ? minChars : 500;
     if (stdout.length + stderr.length < threshold) {
       recordLedgerBestEffort(payload?.session_id, event, 'skippedBelowThreshold');
+      passThrough(payload);
       return;
     }
 
@@ -56,6 +63,7 @@ async function main() {
     const bytesOut = compressedStdout.stats.bytesOut + compressedStderr.stats.bytesOut;
     if (bytesIn === 0 || bytesOut / bytesIn > 0.9) {
       recordLedgerBestEffort(payload?.session_id, event, 'skippedPoorRatio');
+      passThrough(payload);
       return;
     }
 

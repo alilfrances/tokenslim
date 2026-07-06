@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { loadState, saveState, recordDiagnostic, recordSavings } from './lib/state.mjs';
-import { postToolUseOutput } from './lib/hook-output.mjs';
+import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
 
 const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
 
@@ -41,6 +41,11 @@ function recordDiagnosticBestEffort(payload, outcome) {
   } catch {
     // best-effort diagnostics only
   }
+}
+
+function passThrough(payload) {
+  const output = postToolUseNoopOutput(payload);
+  if (output) process.stdout.write(JSON.stringify(output));
 }
 
 // Locate the text-bearing field on a Grep tool_response. Returns
@@ -182,6 +187,7 @@ function tryHandleGlob(payload, toolResponse) {
   const origSerialized = JSON.stringify(filenames);
   if (origSerialized.length < MIN_CHARS || filenames.length <= 100) {
     recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    passThrough(payload);
     return true; // recognized, nothing to do
   }
 
@@ -190,6 +196,7 @@ function tryHandleGlob(payload, toolResponse) {
   const ratio = (origSerialized.length - newSerialized.length) / origSerialized.length;
   if (ratio < 0.1) {
     recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    passThrough(payload);
     return true;
   }
 
@@ -207,6 +214,7 @@ function main(input) {
   }
   if (isDisabled()) {
     recordDiagnosticBestEffort(payload, 'disabled');
+    passThrough(payload);
     return;
   }
   recordDiagnosticBestEffort(payload, 'attempted');
@@ -215,6 +223,7 @@ function main(input) {
   const toolName = payload && payload.tool_name;
   if (!toolResponse) {
     recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    passThrough(payload);
     return;
   }
 
@@ -226,16 +235,19 @@ function main(input) {
   const locator = locateText(toolResponse);
   if (!locator) {
     recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    passThrough(payload);
     return;
   }
 
   const text = locator.get();
   if (typeof text !== 'string') {
     recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    passThrough(payload);
     return;
   }
   if (text.length < MIN_CHARS) {
     recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    passThrough(payload);
     return;
   }
 
@@ -245,6 +257,7 @@ function main(input) {
   const ratio = text.length > 0 ? saved / text.length : 0;
   if (ratio < 0.1) {
     recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    passThrough(payload);
     return;
   }
 

@@ -159,6 +159,25 @@ test('entrypoint passes through small output and disabled bash output', () => {
   assert.equal(disabled.stdout, '');
 });
 
+test('Bash entrypoint emits valid Codex no-op JSON for pass-through output', () => {
+  const payload = JSON.stringify({
+    session_id: 's-codex-bash-skip',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    turn_id: 'turn-codex',
+    tool_response: { stdout: 'short', stderr: '', interrupted: false, isImage: false },
+  });
+  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    cwd: root,
+    input: payload,
+    encoding: 'utf8',
+    env: { ...process.env, TOKENSLIM_HOOK_RUNTIME: 'codex' },
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, '{}');
+});
+
 test('Bash entrypoint records diagnostics for skipped and compressed outputs', () => {
   const cacheRoot = mkdtempSync(pathJoin(tmpdir(), 'tokenslim-bash-diag-'));
   try {
