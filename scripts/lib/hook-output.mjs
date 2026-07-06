@@ -12,10 +12,12 @@ export function detectRuntime(payload, env = process.env) {
   const override = String(env.TOKENSLIM_HOOK_RUNTIME || '').trim().toLowerCase();
   if (override === 'codex' || override === 'claude') return override;
 
-  if (env.PLUGIN_ROOT || env.PLUGIN_DATA || env.CODEX_PLUGIN_ROOT) return 'codex';
+  if (env.CLAUDE_PLUGIN_ROOT) return 'claude';
+  if (env.PLUGIN_DATA || env.CODEX_PLUGIN_ROOT) return 'codex';
+  if (env.PLUGIN_ROOT && !isObject(payload)) return 'codex';
   if (
     isObject(payload) &&
-    ('turn_id' in payload || 'permission_mode' in payload || 'transcript_path' in payload || 'model' in payload)
+    ('turn_id' in payload || 'permission_mode' in payload)
   ) {
     return 'codex';
   }

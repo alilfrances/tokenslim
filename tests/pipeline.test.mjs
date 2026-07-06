@@ -156,6 +156,30 @@ test('entrypoint passes through small output and disabled bash output', () => {
   assert.equal(disabled.stdout, '');
 });
 
+test('Bash entrypoint treats Claude transcript payloads as non-blocking replacements', () => {
+  const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
+  const payload = JSON.stringify({
+    session_id: 's-claude-bash',
+    transcript_path: '/tmp/claude-transcript.jsonl',
+    hook_event_name: 'PostToolUse',
+    tool_name: 'Bash',
+    tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
+  });
+  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    cwd: root,
+    input: payload,
+    encoding: 'utf8',
+    env: { ...process.env, TOKENSLIM_MIN_CHARS: '10' },
+  });
+
+  assert.equal(result.status, 0);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continue, undefined);
+  assert.equal(out.stopReason, undefined);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.match(out.hookSpecificOutput.updatedToolOutput.stdout, /\[tokenslim: 6 similar lines collapsed\]/);
+});
+
 test('Bash entrypoint emits short Codex stop text and compressed additional context', () => {
   const stdout = Array.from({ length: 6 }, (_, i) => `build worker ${i} processed ${i} files`).join('\n');
   const payload = JSON.stringify({
