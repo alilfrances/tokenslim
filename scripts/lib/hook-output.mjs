@@ -130,3 +130,14 @@ export function postToolUseNoopOutput(payload) {
   if (detectRuntime(payload) === 'codex') return {};
   return null;
 }
+
+export function preToolUseAdditionalContextOutput(payload, additionalContext) {
+  const output = {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      additionalContext,
+    },
+  };
+  if (detectRuntime(payload) === 'codex') return output;
+  return output;
+}

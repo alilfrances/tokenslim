@@ -1,8 +1,9 @@
 # tokenslim
 
 **Input-token compressor for Claude Code and Codex.** Shrinks tool results — Bash output, file
-reads, grep results — *before* they enter the model's context. Deterministic, prompt-cache
-safe, zero dependencies, fail-open.
+reads, grep results, MCP tool results — *before* they enter the model's context, keeps the
+Read dedup cache warm across Edit/Write, and warns before large unbounded reads.
+Deterministic, prompt-cache safe, zero dependencies, fail-open.
 
 Measured on this repo's fixture corpus and live sessions:
 
@@ -63,7 +64,7 @@ codex plugin marketplace add /path/to/tokenslim
 codex plugin add tokenslim@tokenslim
 ```
 
-Then restart Codex. The bundled `PostToolUse` hooks live in `hooks/hooks.json`;
+Then restart Codex. The bundled `PostToolUse`/`PreToolUse` hooks live in `hooks/hooks.json`;
 Codex may ask you to review and trust them through `/hooks` before they run.
 
 **Claude Code optional statusline** (context % + live savings) — add to
@@ -90,10 +91,11 @@ this checkout).
 
 ## What it does
 
-Three `PostToolUse` hooks intercept tool results and replace them with compressed
-versions before the model ever sees them. Claude Code receives structured
-`updatedToolOutput`; Codex receives a short `continue: false` stop message while
-the compressed output is added through `hookSpecificOutput.additionalContext`:
+Five `PostToolUse` hooks intercept tool results and replace them with compressed
+versions before the model ever sees them, plus one `PreToolUse` guard. Claude Code
+receives structured `updatedToolOutput`; Codex receives a short `continue: false`
+stop message while the compressed output is added through
+`hookSpecificOutput.additionalContext`:
 
 - **Bash** — strips ANSI codes, progress bars/spinners, `\r`-overwritten lines; collapses
   repeated log lines (timestamp/id-normalized fingerprinting); summarizes test-runner
@@ -106,6 +108,16 @@ the compressed output is added through `hookSpecificOutput.additionalContext`:
   (research shows a measurable task-accuracy drop when they are).
 - **Grep/Glob** — dedups identical match lines, collapses runs of matches from the same
   file, groups huge glob listings by directory. Compact modes pass through untouched.
+- **Edit/Write** — after a successful edit of a previously-read file (or any Write, whose
+  full content the model authored), rehashes the file so the *next* Read dedups to a stub
+  instead of re-injecting the whole file. Read→edit→re-read is one of the most common
+  agent patterns; without this the dedup cache is invalidated by every edit.
+- **MCP tools** (`mcp__*`) — minifies pretty-printed JSON responses (lossless) and
+  truncates base64/data-URI blobs. Optional collapse of huge homogeneous object arrays
+  behind `TOKENSLIM_MCP_ARRAYS=1` (off by default — items may be individually load-bearing).
+- **Read guard** (`PreToolUse`) — when a Read targets a file over 2,000 lines with no
+  `offset`/`limit`, injects a non-blocking hint (file size, rough token cost, suggestion to
+  use `offset`/`limit` or Grep). Never blocks the read.
 
 Every replacement is marked with a `[tokenslim: ...]` marker so you can always tell what
 was compressed.
@@ -123,8 +135,11 @@ was compressed.
 
 | Var | Default | Effect |
 |---|---|---|
-| `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, or `all` |
+| `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, or `all` |
 | `TOKENSLIM_MIN_CHARS` | `500` | Outputs smaller than this pass through untouched |
+| `TOKENSLIM_MCP_ARRAYS` | off | Set to `1` to collapse >50-item homogeneous arrays in MCP JSON results |
+| `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard hint threshold (lines) |
+| `TOKENSLIM_READ_DEFAULT_LINES` | `2000` | Files longer than this are never cache-warmed after Edit/Write (Read would truncate) |
 
 ## Design guarantees
 
@@ -148,10 +163,12 @@ was compressed.
 [Cortex](https://github.com/alilfrances/Cortex) and tokenslim are complementary and safe
 to run together: Cortex proactively *selects* which repo context enters the conversation
 (graph-ranked, token-budgeted bundles over MCP), while tokenslim reactively *compresses*
-tool results after they arrive. Cortex's MCP tool results are untouched by tokenslim —
-the PostToolUse matchers only cover Bash/Read/Grep/Glob — so the two never double-process
-the same content. If you pipe `cortex bundle` output through Bash instead of MCP, very
-large bundles (>40KB) can be head/tail truncated by tokenslim; prefer the MCP tools.
+tool results after they arrive. As of v0.2.0 the `mcp__*` hook also touches Cortex's MCP
+results, but only with lossless transforms (JSON minify, base64 truncation) — content is
+never dropped unless you opt into `TOKENSLIM_MCP_ARRAYS=1`. To exempt MCP results
+entirely, set `TOKENSLIM_DISABLE=mcp`. If you pipe `cortex bundle` output through Bash
+instead of MCP, very large bundles (>40KB) can be head/tail truncated by tokenslim;
+prefer the MCP tools.
 
 ## How savings are measured
 
@@ -179,13 +196,14 @@ $3/MTok input pricing — both assumptions are documented in the code.
 ## Development
 
 ```bash
-node --test tests/*.test.mjs   # 44 tests: rules, determinism, fail-open, ratio floors
+node --test tests/*.test.mjs   # 70 tests: rules, determinism, fail-open, ratio floors
 ```
 
 Repo layout: `scripts/lib/pipeline.mjs` (pure compression rules), `scripts/lib/state.mjs`
-(ledger + read cache), `scripts/compress-{bash,read,grep}.mjs` (hook entrypoints),
-`hooks/hooks.json` (wiring), `docs/` (design spec, plan, discovered tool_response shapes),
-`scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
+(ledger + read cache), `scripts/lib/read-format.mjs` (shared Read text/hash helpers),
+`scripts/compress-{bash,read,grep,edit,mcp}.mjs` and `scripts/guard-read.mjs` (hook
+entrypoints), `hooks/hooks.json` (wiring), `docs/` (design spec, plan, discovered
+tool_response shapes), `scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
 
 ## FAQ
 

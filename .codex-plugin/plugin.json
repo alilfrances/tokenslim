@@ -1,7 +1,7 @@
 {
   "name": "tokenslim",
-  "version": "0.1.7",
-  "description": "Input-token compressor for Claude Code and Codex. Compresses Bash, Read, Grep, and Glob tool results before they enter model context via deterministic, cache-safe heuristics.",
+  "version": "0.2.0",
+  "description": "Input-token compressor for Claude Code and Codex. Compresses Bash, Read, Grep, Glob, and MCP tool results before they enter model context, keeps the Read dedup cache warm across Edit/Write, and warns before large unbounded reads.",
   "author": {
     "name": "Alil Kuizon"
   },
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "tokenslim",
     "shortDescription": "Compress noisy tool output before it enters Codex context",
-    "longDescription": "tokenslim bundles PostToolUse hooks for Bash, Read, Grep, and Glob. It uses deterministic, fail-open heuristics to reduce repeated logs, repeated reads, and large search results while preserving failing test names, errors, paths, and other high-signal details.",
+    "longDescription": "tokenslim bundles PostToolUse hooks for Bash, Read, Edit, Write, Grep, Glob, and MCP tools plus a PreToolUse guard for large unbounded reads. It uses deterministic, fail-open heuristics to reduce repeated logs, repeated reads, and large search results while preserving failing test names, errors, paths, and other high-signal details.",
     "developerName": "Alil Kuizon",
     "category": "Developer Tools",
     "capabilities": [

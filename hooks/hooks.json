@@ -22,11 +22,43 @@
         ]
       },
       {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}/scripts/compress-edit.mjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}/scripts/compress-mcp.mjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Grep|Glob",
         "hooks": [
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}/scripts/compress-grep.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-.}}/scripts/guard-read.mjs\"",
             "timeout": 10
           }
         ]

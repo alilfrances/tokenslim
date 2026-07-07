@@ -39,7 +39,10 @@ test('Codex marketplace points at the plugin root', () => {
 
 test('hook commands prefer Claude root, then Codex root, then local root', () => {
   const hooks = readJson('hooks/hooks.json');
-  const groups = hooks.hooks.PostToolUse.flatMap((group) => group.hooks);
+  assert.ok(hooks.hooks.PostToolUse.some((group) => group.matcher === 'Edit|Write'));
+  assert.ok(hooks.hooks.PostToolUse.some((group) => group.matcher === 'mcp__.*'));
+  assert.ok(hooks.hooks.PreToolUse.some((group) => group.matcher === 'Read'));
+  const groups = Object.values(hooks.hooks).flat().flatMap((group) => group.hooks);
   const env = { ...process.env };
   delete env.PLUGIN_ROOT;
   delete env.CLAUDE_PLUGIN_ROOT;
