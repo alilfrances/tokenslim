@@ -1,5 +1,9 @@
 # tokenslim v2 — Gap-Closure Plan (2026-07-07)
 
+> Historical delivery note: this plan describes the v2 gap-closure work before it landed. The
+> Edit/Write-aware Read cache, generic MCP compression, and PreToolUse Read guard shipped in
+> `0.2.0`; the sections below are retained as design history rather than pending scope.
+
 ## Research summary (why these features)
 
 Measured token-spend ranking for coding agents (arXiv 2601.14470 "Tokenomics", Stanford
@@ -23,7 +27,7 @@ Two structural gaps, i.e. "different angles" beyond v1's compress-after-fetch mo
 - **Prevention vs compression**: PreToolUse can stop waste before it enters context;
   v1 only shrinks after the fact.
 
-## Feature A — Edit/Write-aware read cache (highest impact)
+## Feature A — Edit/Write-aware read cache (shipped in 0.2.0)
 
 Problem: `compress-read.mjs` dedups a re-read only when the file content hash is unchanged.
 Every Edit/Write changes the hash, so the very common pattern *read → edit → re-read* always
@@ -55,7 +59,7 @@ Implementation:
 6. Ledger: record savings under new tool bucket `Edit` only when a later Read actually dedups
    (the Edit hook itself saves nothing directly — attribute at Read time as today).
 
-## Feature B — Generic MCP tool-result compressor
+## Feature B — Generic MCP tool-result compressor (shipped in 0.2.0)
 
 Problem: MCP tools return pretty-printed JSON, base64 blobs, and giant homogeneous arrays;
 none of the v1 hooks match `mcp__*` tools.
@@ -78,7 +82,7 @@ Implementation:
 4. Same rails as every v1 hook: `MIN_CHARS` 500, ratio floor 0.1, `TOKENSLIM_DISABLE=mcp`,
    fail-open, ledger bucket `MCP`.
 
-## Feature C — PreToolUse Read guard (prevention angle, small)
+## Feature C — PreToolUse Read guard (shipped in 0.2.0)
 
 1. New hook `scripts/guard-read.mjs`, **PreToolUse** matcher `Read`.
 2. If `tool_input.file_path` exists on disk, line count > threshold (default 2000, env
@@ -110,6 +114,7 @@ Implementation:
 ## Rollout / risk
 
 - Feature A is the only risky one (hash parity). Its failure mode is benign: hash never
-  matches → v1 behavior, zero regression. Ship env kill switch `TOKENSLIM_DISABLE=edit`.
+  matches → v1 behavior, zero regression. The shipped surface includes per-hook disable values
+  such as `TOKENSLIM_DISABLE=edit`, `mcp`, and `readguard`.
 - All hooks keep the Codex-runtime adapter path via `scripts/lib/hook-output.mjs`.
 - Conventional commits, one commit per feature.

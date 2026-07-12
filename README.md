@@ -1,7 +1,7 @@
 # tokenslim
 
 **Input-token compressor for Claude Code and Codex.** Shrinks tool results — Bash output, file
-reads, grep results, MCP tool results — *before* they enter the model's context, keeps the
+reads, Grep/Glob results, MCP tool results — *before* they enter the model's context, keeps the
 Read dedup cache warm across Edit/Write, and warns before large unbounded reads.
 Deterministic, prompt-cache safe, zero dependencies, fail-open.
 
@@ -32,31 +32,56 @@ Requires Node 18+ (Claude Code and Codex already require Node — no new deps).
 
 ### Claude Code
 
+Official docs:
+- Claude Code plugin discovery: https://code.claude.com/docs/en/discover-plugins
+- Claude Code marketplace and CLI reference: https://code.claude.com/docs/en/plugin-marketplaces
+
 **Option A — try it for one session:**
 
 ```bash
 claude --plugin-dir /path/to/tokenslim
 ```
 
-**Option B — install permanently from a local clone:**
+**Option B — install permanently from a local clone in an active Claude Code session:**
 
 ```bash
 git clone https://github.com/alilfrances/tokenslim.git
+```
+
+Then, inside Claude Code, run:
+
+```text
+/plugin marketplace add /path/to/tokenslim
+/plugin install tokenslim@tokenslim
+```
+
+**Option C — install from a local clone with the external Claude CLI:**
+
+```bash
 claude plugin marketplace add /path/to/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
-**Option C — from GitHub (easiest):**
+**Option D — from GitHub (easiest):**
 
 ```bash
 claude plugin marketplace add alilfrances/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
+Inside an active Claude Code session, the equivalent commands are:
+
+```text
+/plugin marketplace add alilfrances/tokenslim
+/plugin install tokenslim@tokenslim
+```
+
 ### Codex
 
-This repo includes a Codex plugin manifest at `.codex-plugin/plugin.json` and a local
-marketplace file at `.agents/plugins/marketplace.json`.
+Official docs: [Codex marketplace setup](https://developers.openai.com/codex/plugins/build#add-a-marketplace-from-the-cli) and [Codex plugin CLI](https://developers.openai.com/codex/cli/reference#codex-plugin).
+
+This repo's actual plugin id is `tokenslim`. It includes `.claude-plugin/marketplace.json`,
+`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`.
 
 ```bash
 git clone https://github.com/alilfrances/tokenslim.git
@@ -91,7 +116,7 @@ this checkout).
 
 ## What it does
 
-Five `PostToolUse` hooks intercept tool results and replace them with compressed
+Five `PostToolUse` matchers cover Bash, Read, Edit|Write, `mcp__.*`, and Grep|Glob, replacing tool results with compressed
 versions before the model ever sees them, plus one `PreToolUse` guard. Claude Code
 receives structured `updatedToolOutput`; Codex receives a short `continue: false`
 stop message while the compressed output is added through
@@ -140,6 +165,12 @@ was compressed.
 | `TOKENSLIM_MCP_ARRAYS` | off | Set to `1` to collapse >50-item homogeneous arrays in MCP JSON results |
 | `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard hint threshold (lines) |
 | `TOKENSLIM_READ_DEFAULT_LINES` | `2000` | Files longer than this are never cache-warmed after Edit/Write (Read would truncate) |
+
+`TOKENSLIM_HOOK_RUNTIME=claude|codex` forces the Claude/Codex hook-output adapter when
+auto-detection is not enough.
+
+`TOKENSLIM_DISABLE` supports `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, and
+`all`. `Glob` shares the Grep hook and disable path.
 
 ## Design guarantees
 

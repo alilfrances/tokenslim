@@ -1,10 +1,15 @@
 # tokenslim — Design Spec (2026-07-05)
 
+> Historical design record: this document captures the pre-release design for v1/v2 work. The
+> repository shipped as a Node-based Claude/Codex plugin, not an npm package, and the v2 features
+> called out here are now present in `0.2.0`.
+
 ## Goal
 
-Claude Code plugin that cuts **input-token** usage 50%+ on tool-heavy sessions by compressing
-tool results (Bash, Read, Grep/Glob output) *before* they enter model context. Complements the
-caveman plugin (output-side compression). Zero runtime dependencies, deterministic, fail-open.
+Node-based Claude/Codex plugin that cuts **input-token** usage 50%+ on tool-heavy sessions by
+compressing tool results (Bash, Read, Grep/Glob, and MCP output) *before* they enter model
+context. Complements the caveman plugin (output-side compression). Zero runtime dependencies,
+deterministic, fail-open.
 
 ## Why this design (research-backed)
 
@@ -55,10 +60,9 @@ caveman plugin (output-side compression). Zero runtime dependencies, determinist
 
 ## Risk plan
 
-Read/Grep `tool_response` shape undocumented → Phase-0 discovery harness (debug hook logging
-`tool_response` via `claude -p`). If replacement proves flaky: v1 ships Bash-only replacement
-(documented shape) + Read-dedup downgraded to `additionalContext` hint; still ≥50% on
-tool-heavy sessions per comparable-tool numbers.
+This risk was retired during implementation: Read/Grep replacement shapes were verified, and v2
+shipped with the generic MCP compressor plus the PreToolUse Read guard instead of falling back to
+a Bash-only surface.
 
 ## Testing
 
