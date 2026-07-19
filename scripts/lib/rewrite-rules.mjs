@@ -1,6 +1,8 @@
 // Conservative PreToolUse Bash rewrite registry. It never replaces a command binary.
 
-const UNSAFE_SHELL = /<<|\$\(|`|;|&&|\|\||\||>|&/;
+// A rewrite returns permissionDecision:"allow", so decline every shell control form,
+// including newlines (which are command separators) and input/process redirection.
+const UNSAFE_SHELL = /\$\(|`|[\r\n<>;|&]/;
 
 // Minimal shell tokenizer for inspection only. It deliberately declines malformed quotes;
 // the original command is always preserved and flags are appended verbatim.
@@ -56,7 +58,9 @@ export function rewriteCommand(command, config = {}) {
   if (typeof command !== 'string' || UNSAFE_SHELL.test(command)) return null;
   const tokens = tokenizeCommand(command);
   if (!tokens || !tokens.length || config?.rewrite?.enabled === false || excluded(tokens, config)) return null;
-  if (hasVerboseFlag(tokens)) return null;
+  // Appending after `--` would target the child command or positional arguments rather
+  // than the allowlisted binary, so leave such commands untouched.
+  if (tokens.includes('--') || hasVerboseFlag(tokens)) return null;
 
   const binary = tokens[0];
   const subcommand = tokens[1];

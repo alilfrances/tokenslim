@@ -23,7 +23,7 @@ test('docker build is opt-in', () => {
 });
 
 test('guards unsafe syntax, explicit verbosity, exclusions, and disabled rewrite', () => {
-  for (const input of ['npm install && echo ok', 'npm install; echo ok', 'npm install | tee x', 'npm install >x', 'npm install &', 'npm install <<EOF', 'npm install $(echo x)', 'npm install --verbose', 'npm install -vv', 'npm install --loglevel=warn']) assert.equal(rewriteCommand(input, config), null, input);
+  for (const input of ['npm install && echo ok', 'npm install; echo ok', 'npm install | tee x', 'npm install >x', 'npm install <input', 'npm install &', 'npm install <<EOF', 'npm install $(echo x)', 'npm install\necho unsafe', 'npm install\recho unsafe', 'npm install -- package', 'npm install --verbose', 'npm install -vv', 'npm install --loglevel=warn']) assert.equal(rewriteCommand(input, config), null, input);
   assert.equal(rewriteCommand('npm ci', { rewrite: { exclude: ['npm ci'] } }), null);
   assert.equal(rewriteCommand('npm ci', { rewrite: { enabled: false } }), null);
 });

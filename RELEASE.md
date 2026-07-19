@@ -16,8 +16,8 @@ Example for version `0.3.0`:
 node --test tests/*.test.mjs
 node scripts/validate-release-version.mjs
 node scripts/benchmark.mjs --format md  # verify README fixture table
-# Review docs/SMOKE-0.3.0.md; do not turn unrun smoke checks into passes.
-git add .codex-plugin/plugin.json .claude-plugin/plugin.json README.md docs/
+# Complete live Claude/Codex smoke checks and record any blockers in the release notes.
+git add -A
 git commit -m "chore: release v0.3.0"
 git tag v0.3.0
 git push origin main --tags

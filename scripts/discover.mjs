@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { loadConfig } from './lib/config.mjs';
+import { commandFamily } from './lib/privacy.mjs';
 import { rewriteCommand } from './lib/rewrite-rules.mjs';
 
 const CHARS_PER_TOKEN = 3;
@@ -54,10 +55,6 @@ function blocks(node, found = []) {
   for (const child of Object.values(node)) blocks(child, found);
   return found;
 }
-function family(command) {
-  const parts = String(command || '').trim().split(/\s+/).filter(Boolean);
-  return parts.slice(0, Math.min(parts.length, 2)).join(' ') || '(unknown)';
-}
 function add(map, key, bytes, extra = {}) {
   const item = map.get(key) || { command: key, bytes: 0, tokens: 0, occurrences: 0, ...extra };
   item.bytes += bytes; item.tokens = Math.round(item.bytes / CHARS_PER_TOKEN); item.occurrences += 1; map.set(key, item);
@@ -83,14 +80,15 @@ function discover() {
         if (block.kind === 'use' && block.id && typeof block.command === 'string') uses.set(block.id, block.command);
         if (block.kind !== 'result' || !block.id || !uses.has(block.id)) continue;
         const command = uses.get(block.id); const output = block.output; const bytes = Buffer.byteLength(output, 'utf8');
-        pairs += 1; add(families, family(command), bytes);
-        if (!output.includes('[tokenslim:')) add(sinks, command, bytes);
-        if (!output.includes('[tokenslim:') && rewriteCommand(command, config)) add(opportunities, command, bytes);
+        const safeCommand = commandFamily(command);
+        pairs += 1; add(families, safeCommand, bytes);
+        if (!output.includes('[tokenslim:')) add(sinks, safeCommand, bytes);
+        if (!output.includes('[tokenslim:') && rewriteCommand(command, config)) add(opportunities, safeCommand, bytes);
       }
     }
   }
   const sort = (map) => [...map.values()].sort((a, b) => b.tokens - a.tokens || a.command.localeCompare(b.command)).slice(0, limit);
-  return { transcriptRoot, scannedFiles, pairs, sinceDays: since, limit, sinks: sort(sinks), rewriteOpportunities: sort(opportunities), commandFamilies: sort(families) };
+  return { scannedFiles, pairs, sinceDays: since, limit, sinks: sort(sinks), rewriteOpportunities: sort(opportunities), commandFamilies: sort(families) };
 }
 function render(report) {
   if (!report.scannedFiles) return 'tokenslim discover: no transcripts found.';

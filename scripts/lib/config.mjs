@@ -1,5 +1,5 @@
 // Shared, fail-open configuration loader. File layers are intentionally optional.
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { recordDiagnostic } from './state.mjs';
@@ -30,6 +30,17 @@ function diagnostic(outcome) {
   recordDiagnostic(diagnostics, { tool: 'Config', event: 'loadConfig', outcome });
 }
 
+function validFilter(value) {
+  if (!plainObject(value) || typeof value.matchCommand !== 'string') return null;
+  const filter = { matchCommand: value.matchCommand };
+  if (typeof value.name === 'string') filter.name = value.name;
+  if (typeof value.stripAnsi === 'boolean') filter.stripAnsi = value.stripAnsi;
+  if (typeof value.stripLinesMatching === 'string') filter.stripLinesMatching = value.stripLinesMatching;
+  if (Number.isInteger(value.maxLines) && value.maxLines >= 0) filter.maxLines = value.maxLines;
+  if (['keep', 'drop', 'empty'].includes(value.onEmpty)) filter.onEmpty = value.onEmpty;
+  return filter;
+}
+
 function validLayer(value) {
   if (!plainObject(value)) return null;
   const layer = {};
@@ -51,12 +62,17 @@ function validLayer(value) {
     if (typeof value.rewrite.dockerBuild === 'boolean') rewrite.dockerBuild = value.rewrite.dockerBuild;
     if (Object.keys(rewrite).length) layer.rewrite = rewrite;
   }
-  if (Array.isArray(value.filters)) layer.filters = value.filters.filter(plainObject);
+  if (Array.isArray(value.filters)) layer.filters = value.filters.slice(0, 50).map(validFilter).filter(Boolean);
   return layer;
 }
 
 function readLayer(path) {
   try {
+    // Project-controlled config must not make every hook load an unbounded file.
+    if (statSync(path).size > 256 * 1024) {
+      diagnostic('oversizedConfig');
+      return null;
+    }
     return validLayer(JSON.parse(readFileSync(path, 'utf8')));
   } catch (error) {
     if (error?.code !== 'ENOENT') diagnostic('malformedConfig');

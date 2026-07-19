@@ -23,6 +23,24 @@ test('config merges global, project, then environment layers', () => temp((dir) 
   assert.deepEqual(config.disable, ['bash', 'rewrite']);
 }));
 
+test('config filters discard unknown fields and cap repository-controlled input', () => temp((dir) => {
+  const filters = Array.from({ length: 60 }, (_, index) => ({
+    name: `filter-${index}`,
+    matchCommand: '^git status$',
+    maxLines: 5,
+    secret: 'must-not-survive-validation',
+  }));
+  writeFileSync(join(dir, '.tokenslim.json'), JSON.stringify({ filters }));
+  const config = loadConfig(dir, { HOME: dir, XDG_CONFIG_HOME: join(dir, 'absent') });
+  assert.equal(config.filters.length, 50);
+  assert.equal(config.filters[0].secret, undefined);
+  assert.deepEqual(config.filters[0], { name: 'filter-0', matchCommand: '^git status$', maxLines: 5 });
+
+  clearConfigCache();
+  writeFileSync(join(dir, '.tokenslim.json'), JSON.stringify({ padding: 'x'.repeat(300_000), minChars: 1 }));
+  assert.equal(loadConfig(dir, { HOME: dir, XDG_CONFIG_HOME: join(dir, 'absent') }).minChars, 500);
+}));
+
 test('config ignores malformed files and missing files', () => temp((dir) => {
   const xdg = join(dir, 'xdg');
   mkdirSync(join(xdg, 'tokenslim'), { recursive: true });

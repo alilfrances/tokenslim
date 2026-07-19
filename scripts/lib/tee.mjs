@@ -1,5 +1,5 @@
 // Best-effort recovery copies for output where compression drops information.
-import { mkdirSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { chmodSync, closeSync, constants, fchmodSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,7 +9,9 @@ const DEFAULT_MAX_FILES = 20;
 function stableId(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return null;
   const id = String(value);
-  return id ? encodeURIComponent(id) : null;
+  // encodeURIComponent leaves dots untouched; encode them explicitly so `.` and `..`
+  // can never become path components.
+  return id ? encodeURIComponent(id).replace(/\./g, '%2E') : null;
 }
 
 export function teePath(sessionId, toolUseId, env = process.env) {
@@ -63,8 +65,18 @@ export function teeOriginalOutput(text, {
     const maxFiles = Number.isFinite(config?.tee?.maxFiles) ? config.tee.maxFiles : DEFAULT_MAX_FILES;
     if (!path || maxFiles <= 0) return null;
     const directory = join(path, '..');
-    mkdirSync(directory, { recursive: true });
-    writeFileSync(path, String(text ?? ''), 'utf8');
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (lstatSync(directory).isSymbolicLink()) return null;
+    try { chmodSync(directory, 0o700); } catch { /* best effort on non-POSIX filesystems */ }
+    let descriptor;
+    try {
+      const noFollow = constants.O_NOFOLLOW || 0;
+      descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | noFollow, 0o600);
+      try { fchmodSync(descriptor, 0o600); } catch { /* best effort on non-POSIX filesystems */ }
+      writeFileSync(descriptor, String(text ?? ''), 'utf8');
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
     prune(directory, Math.floor(maxFiles));
     // A concurrent/pruning writer may have removed this file; do not advertise it.
     try { statSync(path); } catch { return null; }

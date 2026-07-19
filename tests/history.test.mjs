@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
@@ -22,6 +22,15 @@ test('daily history aggregates event deltas and atomically writes JSON', () => w
   assert.deepEqual(day.byProject['/repo'], { bytesIn: 150, bytesOut: 45, events: 2 });
   assert.ok(existsSync(historyPath()));
   assert.doesNotThrow(() => JSON.parse(readFileSync(historyPath(), 'utf8')));
+  assert.equal(statSync(historyPath()).mode & 0o777, 0o600);
+}));
+
+test('history stores privacy-safe command families instead of command arguments', () => withData(() => {
+  const command = 'curl -H "Authorization: Bearer super-secret" https://example.invalid/?token=secret';
+  assert.equal(updateHistory([{ tool: 'Bash', command, cwd: '/repo', bytesIn: 100, bytesOut: 10 }], new Date('2026-07-19T12:00:00Z')), true);
+  const serialized = readFileSync(historyPath(), 'utf8');
+  assert.doesNotMatch(serialized, /super-secret|example\.invalid|token=secret/);
+  assert.deepEqual(loadHistory().days['2026-07-19'].byCommand.curl, { bytesIn: 100, bytesOut: 10, events: 1 });
 }));
 
 test('corrupt history recovers and retention removes records older than 90 days', () => withData(() => {

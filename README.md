@@ -194,16 +194,28 @@ Optional JSON config layers merge in this order: built-in defaults, user
 set `minChars`, `disable`, `readGuardLines`, `tee` (`enabled`, `mode`, `maxFiles`),
 `rewrite` (`enabled`, `exclude`, `dockerBuild`), and command `filters`. See
 [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) for rewrite configuration and guards.
+Project filters control successful-command output, so review `.tokenslim.json` in untrusted
+checkouts.
 
 When lossy Bash or MCP compression exceeds the tee threshold, tokenslim saves the raw
 output under `$XDG_CACHE_HOME/tokenslim/tee/<session>/<tool-use>.log` and includes its
 path in the marker. Set `tee.mode` to `failures` or `never` to restrict recovery copies.
 
+### Privacy and local storage
+
+TokenSlim has no telemetry and performs no network requests. Session ledgers, aggregate
+history, transcript discovery, and recovery copies stay local. Analytics retain only command
+families such as `git status`, never command arguments, URLs, headers, credentials, or inline
+environment values. Project paths remain in local history for project reports. Recovery logs
+contain the original raw output and may therefore contain sensitive data; disable them with
+`TOKENSLIM_DISABLE=tee` or `tee.mode: "never"`. See [`SECURITY.md`](SECURITY.md) for storage
+locations, permissions, and the Bash rewrite trust boundary.
+
 ## Design guarantees
 
 - **Prompt-cache safe.** Compression happens once, at injection time, and is fully
   deterministic (same input → byte-identical output; no timestamps or randomness). The
-  compressed version is the only version that ever enters history, so cached prefixes are
+  compressed version is the only version that ever enters conversation history, so cached prefixes are
   never invalidated.
 - **Fail-open.** Any error, unrecognized shape, or oversized-input edge → the hook emits
   nothing and Claude Code uses the original output. A tokenslim bug can never lose data.
@@ -232,9 +244,10 @@ rather than drop detail.
 to run together: Cortex proactively *selects* which repo context enters the conversation
 (graph-ranked, token-budgeted bundles over MCP), while tokenslim reactively *compresses*
 tool results after they arrive. As of v0.3.0 the `mcp__*` hook also touches Cortex's MCP
-results, but only with lossless transforms (JSON minify, base64 truncation) — content is
-never dropped unless you opt into `TOKENSLIM_MCP_ARRAYS=1`. To exempt MCP results
-entirely, set `TOKENSLIM_DISABLE=mcp`. If you pipe `cortex bundle` output through Bash
+results. JSON minification is lossless; marked base64 truncation is lossy and receives a
+recovery copy above the tee threshold. Homogeneous-array collapsing remains opt-in via
+`TOKENSLIM_MCP_ARRAYS=1`. To exempt MCP results entirely, set `TOKENSLIM_DISABLE=mcp`.
+If you pipe `cortex bundle` output through Bash
 instead of MCP, very large bundles (>40KB) can be head/tail truncated by tokenslim;
 prefer the MCP tools.
 

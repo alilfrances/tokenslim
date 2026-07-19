@@ -30,14 +30,20 @@ for (const [name, command, expected] of cases) test(`${name} has an exact determ
   assert.ok(first.text.length < input.length);
 });
 
-test('custom filters precede built-ins and safely handle malformed patterns', () => {
+test('custom filters precede built-ins and reject unsafe or malformed patterns', () => {
   const config = { filters: [{ name: 'clean', matchCommand: '^git status$', stripLinesMatching: '^noise$', maxLines: 1 }] };
   assert.deepEqual(compressCommandOutput('noise\nkeep\nother', 'git status', config), { text: 'keep', rulesApplied: ['custom:clean'] });
   assert.equal(compressCommandOutput('data', 'git status', { filters: [{ matchCommand: '[', maxLines: 1 }] }), null);
+  assert.equal(compressCommandOutput('data', 'unknown command', { filters: [{ matchCommand: '(a+)+$', maxLines: 1 }] }), null);
+  assert.deepEqual(
+    compressCommandOutput('one\ntwo', 'unknown command', { filters: [{ name: 'unsafe\n[injection]', matchCommand: '^unknown', maxLines: 1 }] }),
+    { text: 'one', rulesApplied: ['custom:filter'] },
+  );
 });
 
 test('shell syntax and unknown commands defer to generic compression', () => {
   assert.equal(compressCommandOutput('x\nx', 'echo x | cat'), null);
+  assert.equal(compressCommandOutput('x\nx', 'git status\nprintf unsafe'), null);
   const input = Array.from({ length: 6 }, (_, i) => `worker ${i} completed`).join('\n');
   assert.equal(compressCommandOutput(input, 'unknown command'), null);
   assert.notEqual(compressBashOutput(input).text, input);

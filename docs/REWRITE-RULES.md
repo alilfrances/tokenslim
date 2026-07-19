@@ -22,10 +22,11 @@ respected.
 
 ## Safety guards
 
-The hook declines a command containing a heredoc, command substitution, backticks,
-`;`, `&&`, `||`, a pipe, redirection, or backgrounding. It also declines malformed quoting,
-disabled rewriting, and commands matching `rewrite.exclude`. These guards avoid trying to
-parse shell programs; the original command then runs unchanged.
+The hook declines a command containing newlines, heredocs, command substitution, backticks,
+`;`, `&&`, `||`, pipes, input/output redirection, backgrounding, or a standalone `--` argument
+separator. It also declines malformed quoting, disabled rewriting, and commands matching
+`rewrite.exclude`. These guards avoid treating shell programs or child-command arguments as a
+single allowlisted invocation; the original command then runs unchanged.
 
 ## Runtime behavior
 

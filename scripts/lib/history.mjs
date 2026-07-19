@@ -1,7 +1,8 @@
 // Cross-session daily savings history. All operations are deliberately best-effort.
-import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { commandFamily } from './privacy.mjs';
 
 export const RETENTION_DAYS = 90;
 export function dataDir() {
@@ -42,18 +43,20 @@ export function updateHistory(events, now = new Date()) {
     for (const event of events) {
       const item = { bytesIn: number(event.bytesIn), bytesOut: number(event.bytesOut), events: number(event.events) || 1 };
       const tool = String(event.tool || 'unknown');
-      const command = String(event.command || tool);
+      const command = commandFamily(event.command || tool);
       const project = String(event.cwd || process.cwd());
       add(record.byTool[tool] ||= {}, item);
       add(record.byCommand[command] ||= {}, item);
       add(record.byProject[project] ||= {}, item);
     }
     prune(history, now);
-    mkdirSync(dataDir(), { recursive: true });
+    mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
+    try { chmodSync(dataDir(), 0o700); } catch { /* best effort on non-POSIX filesystems */ }
     const target = historyPath();
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(temp, JSON.stringify(history), 'utf8');
+    writeFileSync(temp, JSON.stringify(history), { encoding: 'utf8', mode: 0o600 });
     renameSync(temp, target);
+    try { chmodSync(target, 0o600); } catch { /* best effort on non-POSIX filesystems */ }
     return true;
   } catch { return false; }
 }
