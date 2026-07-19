@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -15,13 +15,17 @@ import {
 
 function withTempCache(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tokenslim-state-'));
-  const prev = process.env.XDG_CACHE_HOME;
+  const prevCache = process.env.XDG_CACHE_HOME;
+  const prevData = process.env.XDG_DATA_HOME;
   process.env.XDG_CACHE_HOME = dir;
+  process.env.XDG_DATA_HOME = dir;
   try {
     fn(dir);
   } finally {
-    if (prev === undefined) delete process.env.XDG_CACHE_HOME;
-    else process.env.XDG_CACHE_HOME = prev;
+    if (prevCache === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = prevCache;
+    if (prevData === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prevData;
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -34,7 +38,7 @@ test('loadState returns fresh state when nothing saved yet', () => {
 });
 
 test('saveState + loadState roundtrip', () => {
-  withTempCache(() => {
+  withTempCache((dir) => {
     const state = loadState('session-roundtrip');
     recordSavings(state, { tool: 'Read', bytesIn: 1000, bytesOut: 400 });
     readCache(state).set('/a/b.js', { hash: 'deadbeef', headerLine: 42 });
@@ -45,6 +49,7 @@ test('saveState + loadState roundtrip', () => {
     assert.equal(reloaded.savings.Read.bytesIn, 1000);
     assert.equal(reloaded.savings.Read.bytesOut, 400);
     assert.deepEqual(reloaded.reads['/a/b.js'], { hash: 'deadbeef', headerLine: 42 });
+    assert.equal(statSync(join(dir, 'tokenslim', 'session-roundtrip.json')).mode & 0o777, 0o600);
   });
 });
 
@@ -81,6 +86,19 @@ test('sessionId is sanitized against path traversal', () => {
     const cacheDir = join(dir, 'tokenslim');
     assert.ok(existsSync(cacheDir));
   });
+});
+
+test('recordSavings never keeps sensitive command arguments in pending history', () => {
+  const state = { version: 1, savings: {}, reads: {} };
+  recordSavings(state, {
+    tool: 'Bash',
+    bytesIn: 100,
+    bytesOut: 10,
+    command: 'git clone ssh://example.invalid/private.git --config authValue=super-secret',
+    cwd: '/repo',
+  });
+  assert.equal(state.historyEvents[0].command, 'git clone');
+  assert.doesNotMatch(JSON.stringify(state.historyEvents), /super-secret|example\.invalid|private\.git/);
 });
 
 test('recordSavings accumulates across multiple calls for the same tool', () => {

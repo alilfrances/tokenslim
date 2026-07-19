@@ -1,0 +1,2 @@
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                    NAMES
+abc123         nginx:latest   "nginx -g daemon off;"   2 hours ago     Up 2 hours     0.0.0.0:8080->80/tcp     web

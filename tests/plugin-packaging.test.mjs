@@ -42,6 +42,7 @@ test('hook commands prefer Claude root, then Codex root, then local root', () =>
   assert.ok(hooks.hooks.PostToolUse.some((group) => group.matcher === 'Edit|Write'));
   assert.ok(hooks.hooks.PostToolUse.some((group) => group.matcher === 'mcp__.*'));
   assert.ok(hooks.hooks.PreToolUse.some((group) => group.matcher === 'Read'));
+  assert.ok(hooks.hooks.PreToolUse.some((group) => group.matcher === 'Bash'));
   const groups = Object.values(hooks.hooks).flat().flatMap((group) => group.hooks);
   const env = { ...process.env };
   delete env.PLUGIN_ROOT;

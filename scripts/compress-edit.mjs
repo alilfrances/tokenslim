@@ -5,13 +5,14 @@ import { readFileSync } from 'node:fs';
 import { loadState, saveState, readCache, recordDiagnostic } from './lib/state.mjs';
 import { DEFAULT_READ_LINE_LIMIT, readFileRaw, sha256 } from './lib/read-format.mjs';
 import { postToolUseNoopOutput } from './lib/hook-output.mjs';
+import { loadConfig } from './lib/config.mjs';
 
 const READ_LINE_LIMIT = Number(process.env.TOKENSLIM_READ_DEFAULT_LINES) || DEFAULT_READ_LINE_LIMIT;
 
-function isDisabled() {
-  const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
-  const flags = raw.split(',').map((s) => s.trim());
-  return flags.includes('edit') || flags.includes('all');
+function isDisabled(config) {
+  const flags = Array.isArray(config?.disable) ? config.disable : [];
+  const normalized = flags.map((flag) => String(flag).trim().toLowerCase());
+  return normalized.includes('edit') || normalized.includes('all');
 }
 
 function recordDiagnosticBestEffort(payload, outcome) {
@@ -75,7 +76,8 @@ function main(input) {
     return;
   }
 
-  if (isDisabled()) {
+  const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  if (isDisabled(config)) {
     recordDiagnosticBestEffort(payload, 'disabled');
     passThrough(payload);
     return;

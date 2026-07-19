@@ -3,9 +3,11 @@
 // All I/O is best-effort: any failure (permissions, corrupt JSON, missing dirs) yields a
 // fresh/no-op state rather than throwing, so hooks never crash the tool pipeline.
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { updateHistory } from './history.mjs';
+import { commandFamily } from './privacy.mjs';
 
 const CHARS_PER_TOKEN = 3; // rough heuristic for code/log text (~3 chars/token)
 const INPUT_USD_PER_MTOK = 3; // assumption: $3 / 1M input tokens (Claude Sonnet-class pricing)
@@ -52,16 +54,30 @@ export function loadState(sessionId) {
   }
 }
 
+function secureWriteState(sessionId, state) {
+  const directory = cacheDir();
+  const path = statePath(sessionId);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  try { chmodSync(directory, 0o700); } catch { /* best effort on non-POSIX filesystems */ }
+  writeFileSync(path, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+  try { chmodSync(path, 0o600); } catch { /* best effort on non-POSIX filesystems */ }
+}
+
 export function saveState(sessionId, state) {
   try {
-    mkdirSync(cacheDir(), { recursive: true });
-    writeFileSync(statePath(sessionId), JSON.stringify(state), 'utf8');
+    secureWriteState(sessionId, state);
+    // History receives only new savings events, rather than this cumulative ledger.
+    const events = Array.isArray(state?.historyEvents) ? state.historyEvents : [];
+    if (events.length && updateHistory(events)) {
+      delete state.historyEvents;
+      secureWriteState(sessionId, state);
+    }
   } catch {
     // best-effort only; never throw
   }
 }
 
-export function recordSavings(state, { tool, bytesIn, bytesOut }) {
+export function recordSavings(state, { tool, bytesIn, bytesOut, command, cwd }) {
   if (!state || typeof state !== 'object') return state;
   if (!state.savings || typeof state.savings !== 'object') state.savings = {};
   const key = String(tool ?? 'unknown');
@@ -70,6 +86,9 @@ export function recordSavings(state, { tool, bytesIn, bytesOut }) {
   entry.bytesIn += Number(bytesIn) || 0;
   entry.bytesOut += Number(bytesOut) || 0;
   state.savings[key] = entry;
+  // Kept only until saveState atomically incorporates this delta into daily history.
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push({ tool: key, bytesIn, bytesOut, command: commandFamily(command || key), cwd });
   return state;
 }
 

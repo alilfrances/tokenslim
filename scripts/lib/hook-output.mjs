@@ -132,12 +132,30 @@ export function postToolUseNoopOutput(payload) {
 }
 
 export function preToolUseAdditionalContextOutput(payload, additionalContext) {
-  const output = {
+  return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       additionalContext,
     },
   };
-  if (detectRuntime(payload) === 'codex') return output;
-  return output;
+}
+
+// Codex does not yet document updatedInput for PreToolUse. Its default is therefore
+// advisory-only; TOKENSLIM_REWRITE_CODEX is an explicit compatibility escape hatch.
+export function preToolUseRewriteOutput(payload, command, rules, env = process.env) {
+  const reason = `tokenslim quiet-rewrite: ${rules.join(', ')}`;
+  if (detectRuntime(payload, env) === 'codex' && env.TOKENSLIM_REWRITE_CODEX !== '1') {
+    return preToolUseAdditionalContextOutput(
+      payload,
+      `[tokenslim] Suggested quieter Bash command: ${command}`
+    );
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+      permissionDecisionReason: reason,
+      updatedInput: { ...(payload?.tool_input || {}), command },
+    },
+  };
 }

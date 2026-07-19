@@ -10,13 +10,16 @@ Keep these versions identical:
 - `.claude-plugin/plugin.json`
 - Git tag, using `vX.Y.Z`
 
-Example for version `0.1.3`:
+Example for version `0.3.0`:
 
 ```bash
+node --test tests/*.test.mjs
 node scripts/validate-release-version.mjs
-git add .codex-plugin/plugin.json .claude-plugin/plugin.json
-git commit -m "chore: release v0.1.3"
-git tag v0.1.3
+node scripts/benchmark.mjs --format md  # verify README fixture table
+# Complete live Claude/Codex smoke checks and record any blockers in the release notes.
+git add -A
+git commit -m "chore: release v0.3.0"
+git tag v0.3.0
 git push origin main --tags
 ```
 

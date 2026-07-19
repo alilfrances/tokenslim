@@ -1,27 +1,36 @@
 # tokenslim
 
 **Input-token compressor for Claude Code and Codex.** Shrinks tool results — Bash output, file
-reads, grep results, MCP tool results — *before* they enter the model's context, keeps the
-Read dedup cache warm across Edit/Write, and warns before large unbounded reads.
-Deterministic, prompt-cache safe, zero dependencies, fail-open.
+reads, Grep/Glob results, MCP tool results — *before* they enter the model's context. It
+also applies conservative Bash quiet-flag rewrites, keeps the Read dedup cache warm across
+Edit/Write, provides recovery copies and cross-session reporting, and warns before large
+unbounded reads. Deterministic, prompt-cache safe, zero dependencies, fail-open.
 
-Measured on this repo's fixture corpus and live sessions:
+## Fixture benchmark
 
-| Source | Reduction |
-|---|---|
-| Noisy bash output (live session) | **99%** (21.5KB → 134B) |
-| pytest (passing suite) | **96%** |
-| npm test (failing — failures kept verbatim) | **88%** |
-| docker pull | **87%** |
-| npm install | **86%** |
-| cargo build | **85%** |
-| Repeated stack traces | **73%** |
-| Re-read of unchanged file | **~99%** (stub replaces full content) |
-| Dense output (git log, unique lines) | 0% — correctly left untouched |
+Generated with `node scripts/benchmark.mjs --format md` on the checked-in fixture corpus.
+These are reproducible byte reductions; real commands vary by project and tool output.
 
-On tool-heavy sessions this lands well above the 50% target, consistent with published
-numbers from comparable approaches (RTK 60–90%, chop 50–90%, Microsoft context-pruning
-63.9%). And because input tokens are re-sent every turn, savings compound over a session.
+| Fixture | Bytes in | Bytes out | Reduction | Rules applied |
+| --- | ---: | ---: | ---: | --- |
+| cargo-build.txt | 2101 | 309 | 85.3% | stripAnsi, stripProgressNoise, collapseRepeatedLines, summarizeTestRunners |
+| docker-ps.txt | 232 | 168 | 27.6% | dockerTable |
+| docker-pull.txt | 2297 | 296 | 87.1% | stripProgressNoise, collapseRepeatedLines |
+| eslint.txt | 202 | 93 | 54.0% | linterRules |
+| git-diff.txt | 128 | 53 | 58.6% | gitDiff |
+| git-log.txt | 2120 | 2119 | 0.0% | stripProgressNoise |
+| git-status-porcelain.txt | 74 | 57 | 23.0% | gitStatus |
+| go-test-json.txt | 261 | 33 | 87.4% | goTestJson |
+| npm-install.txt | 4451 | 63 | 98.6% | packageManagerSummary |
+| npm-test-failing.txt | 2094 | 256 | 87.8% | stripAnsi, stripProgressNoise, summarizeTestRunners |
+| pytest-failing.txt | 2107 | 909 | 56.9% | stripProgressNoise, summarizeTestRunners |
+| pytest-passing.txt | 2053 | 81 | 96.1% | testRunnerSummary |
+| stacktrace-repeat.txt | 2133 | 586 | 72.5% | stripProgressNoise, dedupStackTraces |
+| tsc.txt | 238 | 46 | 80.7% | linterRules |
+| webpack-build.txt | 2102 | 2101 | 0.0% | stripProgressNoise |
+
+Re-read stubs can save roughly 99% when an unchanged file is read again. Dense unique output
+is intentionally left untouched. Savings compound because input tokens are re-sent every turn.
 
 Pairs with [caveman](https://github.com/JuliusBrussee/caveman) (output-side compression):
 caveman makes the model say less, tokenslim makes it *read* less.
@@ -32,31 +41,56 @@ Requires Node 18+ (Claude Code and Codex already require Node — no new deps).
 
 ### Claude Code
 
+Official docs:
+- Claude Code plugin discovery: https://code.claude.com/docs/en/discover-plugins
+- Claude Code marketplace and CLI reference: https://code.claude.com/docs/en/plugin-marketplaces
+
 **Option A — try it for one session:**
 
 ```bash
 claude --plugin-dir /path/to/tokenslim
 ```
 
-**Option B — install permanently from a local clone:**
+**Option B — install permanently from a local clone in an active Claude Code session:**
 
 ```bash
 git clone https://github.com/alilfrances/tokenslim.git
+```
+
+Then, inside Claude Code, run:
+
+```text
+/plugin marketplace add /path/to/tokenslim
+/plugin install tokenslim@tokenslim
+```
+
+**Option C — install from a local clone with the external Claude CLI:**
+
+```bash
 claude plugin marketplace add /path/to/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
-**Option C — from GitHub (easiest):**
+**Option D — from GitHub (easiest):**
 
 ```bash
 claude plugin marketplace add alilfrances/tokenslim
 claude plugin install tokenslim@tokenslim
 ```
 
+Inside an active Claude Code session, the equivalent commands are:
+
+```text
+/plugin marketplace add alilfrances/tokenslim
+/plugin install tokenslim@tokenslim
+```
+
 ### Codex
 
-This repo includes a Codex plugin manifest at `.codex-plugin/plugin.json` and a local
-marketplace file at `.agents/plugins/marketplace.json`.
+Official docs: [Codex marketplace setup](https://developers.openai.com/codex/plugins/build#add-a-marketplace-from-the-cli) and [Codex plugin CLI](https://developers.openai.com/codex/cli/reference#codex-plugin).
+
+This repo's actual plugin id is `tokenslim`. It includes `.claude-plugin/marketplace.json`,
+`.claude-plugin/plugin.json`, and `.codex-plugin/plugin.json`.
 
 ```bash
 git clone https://github.com/alilfrances/tokenslim.git
@@ -91,17 +125,19 @@ this checkout).
 
 ## What it does
 
-Five `PostToolUse` hooks intercept tool results and replace them with compressed
-versions before the model ever sees them, plus one `PreToolUse` guard. Claude Code
-receives structured `updatedToolOutput`; Codex receives a short `continue: false`
+Five `PostToolUse` matchers cover Bash, Read, Edit|Write, `mcp__.*`, and Grep|Glob,
+replacing tool results with compressed versions before the model ever sees them. Two
+`PreToolUse` matchers add a conservative Bash quiet-flag rewrite and a Read guard. Claude
+Code receives structured `updatedToolOutput`; Codex receives a short `continue: false`
 stop message while the compressed output is added through
 `hookSpecificOutput.additionalContext`:
 
-- **Bash** — strips ANSI codes, progress bars/spinners, `\r`-overwritten lines; collapses
-  repeated log lines (timestamp/id-normalized fingerprinting); summarizes test-runner
-  output to counts while keeping every failing test's name and error **verbatim**; dedups
-  repeated stack traces; head+tail truncates only outputs still over 40KB, always
-  preserving error/warning lines from the omitted middle.
+- **Bash** — before execution, conservatively adds quiet flags to an allowlist of commands
+  without changing the binary (documented in [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md)).
+  After execution, command-aware compressors handle Git, package managers, test runners,
+  linters, and container tables; the generic fallback strips ANSI/progress noise, collapses
+  repeated logs and stack traces, and head+tail truncates only outputs still over 40KB.
+  Failing test names and error text stay **verbatim**.
 - **Read** — hashes file content per session. Re-reading an unchanged file returns a short
   `[tokenslim] ... unchanged since previous read` stub instead of the full content. First
   reads get whitespace-only slimming. **Comments and docstrings are never stripped**
@@ -124,9 +160,13 @@ was compressed.
 
 ## Commands
 
-- **`/tokenslim:tokenstats`** (Claude Code) — measured savings this session: bytes
-  in/out per tool, estimated tokens and dollars saved. Real measurements from the
-  ledger, not estimates. In Codex, run `node /path/to/tokenslim/scripts/stats.mjs`.
+- **`/tokenslim:tokenstats`** (Claude Code) — measured savings; supports daily, weekly,
+  monthly, project, graph, JSON/CSV, and top-command views. In Codex run
+  `node /path/to/tokenslim/scripts/stats.mjs --top`.
+- **`/tokenslim:discover`** — read-only scan of Claude transcripts for uncompressed Bash
+  token sinks and missed rewrite opportunities.
+- **`/tokenslim:doctor`** — checks Node, hook wiring, scripts, writable data directories,
+  active config, disabled features, and runtime detection.
 - **`/tokenslim:slim-memory <file>`** — mechanical CLAUDE.md/rules slimmer: dedups
   redundant rules, strips markdown noise, keeps every directive/path/command byte-identical.
   Shows a preview and asks before writing; original backed up to `<file>.original.md`.
@@ -135,17 +175,47 @@ was compressed.
 
 | Var | Default | Effect |
 |---|---|---|
-| `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, or `all` |
+| `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, `rewrite`, `tee`, or `all` |
 | `TOKENSLIM_MIN_CHARS` | `500` | Outputs smaller than this pass through untouched |
 | `TOKENSLIM_MCP_ARRAYS` | off | Set to `1` to collapse >50-item homogeneous arrays in MCP JSON results |
 | `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard hint threshold (lines) |
 | `TOKENSLIM_READ_DEFAULT_LINES` | `2000` | Files longer than this are never cache-warmed after Edit/Write (Read would truncate) |
+| `TOKENSLIM_TEE_MIN` | `4096` | Minimum original-output bytes before a lossy Bash/MCP result is saved for recovery |
+| `TOKENSLIM_REWRITE_CODEX` | off | Set to `1` to attempt Claude-style Bash input rewriting in Codex; default is advisory only |
+
+`TOKENSLIM_HOOK_RUNTIME=claude|codex` forces the Claude/Codex hook-output adapter when
+auto-detection is not enough. `Glob` shares the Grep hook and disable path.
+
+### Configuration files
+
+Optional JSON config layers merge in this order: built-in defaults, user
+`$XDG_CONFIG_HOME/tokenslim/config.json` (or `~/.config/...`), project
+`.tokenslim.json`, then environment variables. Malformed files are ignored. The file can
+set `minChars`, `disable`, `readGuardLines`, `tee` (`enabled`, `mode`, `maxFiles`),
+`rewrite` (`enabled`, `exclude`, `dockerBuild`), and command `filters`. See
+[`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) for rewrite configuration and guards.
+Project filters control successful-command output, so review `.tokenslim.json` in untrusted
+checkouts.
+
+When lossy Bash or MCP compression exceeds the tee threshold, tokenslim saves the raw
+output under `$XDG_CACHE_HOME/tokenslim/tee/<session>/<tool-use>.log` and includes its
+path in the marker. Set `tee.mode` to `failures` or `never` to restrict recovery copies.
+
+### Privacy and local storage
+
+TokenSlim has no telemetry and performs no network requests. Session ledgers, aggregate
+history, transcript discovery, and recovery copies stay local. Analytics retain only command
+families such as `git status`, never command arguments, URLs, headers, credentials, or inline
+environment values. Project paths remain in local history for project reports. Recovery logs
+contain the original raw output and may therefore contain sensitive data; disable them with
+`TOKENSLIM_DISABLE=tee` or `tee.mode: "never"`. See [`SECURITY.md`](SECURITY.md) for storage
+locations, permissions, and the Bash rewrite trust boundary.
 
 ## Design guarantees
 
 - **Prompt-cache safe.** Compression happens once, at injection time, and is fully
   deterministic (same input → byte-identical output; no timestamps or randomness). The
-  compressed version is the only version that ever enters history, so cached prefixes are
+  compressed version is the only version that ever enters conversation history, so cached prefixes are
   never invalidated.
 - **Fail-open.** Any error, unrecognized shape, or oversized-input edge → the hook emits
   nothing and Claude Code uses the original output. A tokenslim bug can never lose data.
@@ -153,20 +223,31 @@ was compressed.
   types, failing test names, file paths, line numbers, identifiers, numeric literals,
   comments/docstrings. Dense output (unique lines, e.g. `git log`) is left alone rather
   than mangled — compression below 10% savings is skipped entirely.
-- **Zero runtime dependencies.** Plain Node scripts, no model, no network, <50ms per hook.
+- **Zero runtime dependencies.** Plain Node scripts, no model, no network. The benchmark reports an informational <50ms hook target; cold Node-process startup can exceed it, so measure on the target host.
 - **Runtime-compatible hook output.** Claude Code gets the original structured
   replacement shape. Codex gets a short `PostToolUse` `continue: false`
   replacement plus compact output in `additionalContext`.
+
+## Compared with RTK
+
+RTK proxies Bash through an external binary and has a larger command registry. tokenslim
+uses no binary or dependencies, prevents selected Bash noise with an in-place rewrite,
+then applies command-aware and generic compression to Bash **and** native Read, Grep/Glob,
+Edit/Write cache warming, and MCP results. It also provides recovery copies, JSON-based
+cross-session reporting, transcript discovery, and an installation doctor. Neither tool
+can guarantee a particular reduction: tokenslim passes dense or low-savings output through
+rather than drop detail.
 
 ## Stacking with Cortex
 
 [Cortex](https://github.com/alilfrances/Cortex) and tokenslim are complementary and safe
 to run together: Cortex proactively *selects* which repo context enters the conversation
 (graph-ranked, token-budgeted bundles over MCP), while tokenslim reactively *compresses*
-tool results after they arrive. As of v0.2.0 the `mcp__*` hook also touches Cortex's MCP
-results, but only with lossless transforms (JSON minify, base64 truncation) — content is
-never dropped unless you opt into `TOKENSLIM_MCP_ARRAYS=1`. To exempt MCP results
-entirely, set `TOKENSLIM_DISABLE=mcp`. If you pipe `cortex bundle` output through Bash
+tool results after they arrive. As of v0.3.0 the `mcp__*` hook also touches Cortex's MCP
+results. JSON minification is lossless; marked base64 truncation is lossy and receives a
+recovery copy above the tee threshold. Homogeneous-array collapsing remains opt-in via
+`TOKENSLIM_MCP_ARRAYS=1`. To exempt MCP results entirely, set `TOKENSLIM_DISABLE=mcp`.
+If you pipe `cortex bundle` output through Bash
 instead of MCP, very large bundles (>40KB) can be head/tail truncated by tokenslim;
 prefer the MCP tools.
 
@@ -196,14 +277,15 @@ $3/MTok input pricing — both assumptions are documented in the code.
 ## Development
 
 ```bash
-node --test tests/*.test.mjs   # 70 tests: rules, determinism, fail-open, ratio floors
+node --test tests/*.test.mjs   # test suite: rules, determinism, fail-open, release checks
 ```
 
 Repo layout: `scripts/lib/pipeline.mjs` (pure compression rules), `scripts/lib/state.mjs`
 (ledger + read cache), `scripts/lib/read-format.mjs` (shared Read text/hash helpers),
-`scripts/compress-{bash,read,grep,edit,mcp}.mjs` and `scripts/guard-read.mjs` (hook
-entrypoints), `hooks/hooks.json` (wiring), `docs/` (design spec, plan, discovered
-tool_response shapes), `scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
+`scripts/compress-{bash,read,grep,edit,mcp}.mjs`, `scripts/rewrite-bash.mjs`, and
+`scripts/guard-read.mjs` (hook entrypoints), `scripts/lib/cmd-compressors/` (specialized
+Bash compressors), `hooks/hooks.json` (wiring), `docs/` (contracts and operational notes),
+and `scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
 
 ## FAQ
 

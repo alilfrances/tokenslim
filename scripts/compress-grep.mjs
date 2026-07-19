@@ -15,13 +15,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
 import { loadState, saveState, recordDiagnostic, recordSavings } from './lib/state.mjs';
 import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
+import { loadConfig } from './lib/config.mjs';
 
-const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
-
-function isDisabled() {
-  const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
-  const flags = raw.split(',').map((s) => s.trim());
-  return flags.includes('grep') || flags.includes('all');
+function isDisabled(config) {
+  const flags = Array.isArray(config?.disable) ? config.disable : [];
+  const normalized = flags.map((flag) => String(flag).trim().toLowerCase());
+  return normalized.includes('grep') || normalized.includes('all');
 }
 
 function eventName(payload) {
@@ -167,7 +166,7 @@ function recordAndEmit(payload, updatedToolOutput, bytesIn, bytesOut) {
     const state = loadState(sessionId);
     recordDiagnostic(state, { tool: diagnosticTool(payload), event: eventName(payload), outcome: 'compressed' });
     // Both Grep and Glob roll up under a single "Grep" ledger bucket per spec.
-    recordSavings(state, { tool: 'Grep', bytesIn, bytesOut });
+    recordSavings(state, { tool: 'Grep', bytesIn, bytesOut, command: payload?.tool_name || 'Grep', cwd: payload?.cwd });
     saveState(sessionId, state);
   } catch {
     // ledger is best-effort; never block the compressed output
@@ -179,13 +178,13 @@ function recordAndEmit(payload, updatedToolOutput, bytesIn, bytesOut) {
 
 // Glob: no text field, so it's handled separately from the locateText/content path.
 // Returns true if it handled (emitted or intentionally passed through) the response.
-function tryHandleGlob(payload, toolResponse) {
+function tryHandleGlob(payload, toolResponse, config) {
   if (!toolResponse || typeof toolResponse !== 'object' || !Array.isArray(toolResponse.filenames)) {
     return false;
   }
   const filenames = toolResponse.filenames;
   const origSerialized = JSON.stringify(filenames);
-  if (origSerialized.length < MIN_CHARS || filenames.length <= 100) {
+  if (origSerialized.length < config.minChars || filenames.length <= 100) {
     recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
     passThrough(payload);
     return true; // recognized, nothing to do
@@ -212,7 +211,8 @@ function main(input) {
   } catch {
     return;
   }
-  if (isDisabled()) {
+  const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  if (isDisabled(config)) {
     recordDiagnosticBestEffort(payload, 'disabled');
     passThrough(payload);
     return;
@@ -228,7 +228,7 @@ function main(input) {
   }
 
   if (toolName === 'Glob') {
-    tryHandleGlob(payload, toolResponse);
+    tryHandleGlob(payload, toolResponse, config);
     return;
   }
 
@@ -245,7 +245,7 @@ function main(input) {
     passThrough(payload);
     return;
   }
-  if (text.length < MIN_CHARS) {
+  if (text.length < config.minChars) {
     recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
     passThrough(payload);
     return;

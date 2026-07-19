@@ -1,0 +1,3 @@
+src/app.ts(4,2): error TS2322: Type 'string' is not assignable to type 'number'.
+src/app.ts(8,2): error TS2322: Type 'string' is not assignable to type 'number'.
+src/util.ts(1,1): error TS7006: Parameter 'x' implicitly has an 'any' type.
