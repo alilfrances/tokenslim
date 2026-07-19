@@ -11,11 +11,22 @@ export function dataDir() {
 export function historyPath() { return join(dataDir(), 'history.json'); }
 export function freshHistory() { return { days: {} }; }
 
+function sanitizeCommandKeys(history) {
+  for (const record of Object.values(history.days || {})) {
+    const safe = {};
+    for (const [command, item] of Object.entries(record?.byCommand || {})) {
+      add(safe[commandFamily(command)] ||= {}, item);
+    }
+    if (record && typeof record === 'object') record.byCommand = safe;
+  }
+  return history;
+}
+
 export function loadHistory() {
   try {
     const parsed = JSON.parse(readFileSync(historyPath(), 'utf8'));
     return parsed && typeof parsed === 'object' && parsed.days && typeof parsed.days === 'object'
-      ? parsed : freshHistory();
+      ? sanitizeCommandKeys(parsed) : freshHistory();
   } catch { return freshHistory(); }
 }
 

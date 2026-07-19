@@ -31,6 +31,17 @@ test('history stores privacy-safe command families instead of command arguments'
   const serialized = readFileSync(historyPath(), 'utf8');
   assert.doesNotMatch(serialized, /super-secret|example\.invalid|token=secret/);
   assert.deepEqual(loadHistory().days['2026-07-19'].byCommand.curl, { bytesIn: 100, bytesOut: 10, events: 1 });
+
+  // Older history created before command-family redaction is sanitized on read and
+  // rewritten without arguments on the next aggregate update.
+  writeFileSync(historyPath(), JSON.stringify({ days: { '2026-07-19': {
+    byTool: { Bash: { bytesIn: 10, bytesOut: 1, events: 1 } },
+    byCommand: { 'git clone ssh://example.invalid/private.git --config authValue=old-secret': { bytesIn: 10, bytesOut: 1, events: 1 } },
+    byProject: { '/repo': { bytesIn: 10, bytesOut: 1, events: 1 } },
+  } } }));
+  assert.deepEqual(Object.keys(loadHistory().days['2026-07-19'].byCommand), ['git clone']);
+  updateHistory([{ tool: 'Bash', command: 'git status', cwd: '/repo', bytesIn: 5, bytesOut: 1 }], new Date('2026-07-19T13:00:00Z'));
+  assert.doesNotMatch(readFileSync(historyPath(), 'utf8'), /old-secret|example\.invalid|private\.git/);
 }));
 
 test('corrupt history recovers and retention removes records older than 90 days', () => withData(() => {
