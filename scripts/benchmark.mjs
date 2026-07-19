@@ -87,7 +87,9 @@ export function benchmarkFixtures(directory = fixtureDirectory) {
 }
 
 function markdownCell(value) {
-  return String(value).replace(/\|/g, '\\|').replace(/\n/g, '<br>');
+  // Escape backslashes before pipes so an existing backslash cannot neutralize the
+  // delimiter escape (CodeQL js/incomplete-sanitization).
+  return String(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, '<br>');
 }
 
 export function formatMarkdown(results) {

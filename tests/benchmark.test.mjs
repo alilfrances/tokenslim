@@ -36,6 +36,19 @@ test('benchmark formats README-ready markdown and readable text tables', () => {
   assert.match(formatText(results), /^Fixture\s+Bytes in\s+Bytes out\s+Reduction\s+Rules applied/m);
 });
 
+test('benchmark markdown escapes existing backslashes before table delimiters', () => {
+  const markdown = formatMarkdown([{
+    fixture: 'a\\|b\nc',
+    bytesIn: 1,
+    bytesOut: 1,
+    reduction: 0,
+    rulesApplied: ['rule\\|name'],
+  }]);
+  const row = markdown.split('\n')[2];
+  assert.equal(row.slice(2, row.indexOf(' |', 2)), String.raw`a\\\|b<br>c`);
+  assert.match(row, /rule\\\\\\\|name/);
+});
+
 test('README savings table is synchronized with the generated benchmark', () => {
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   const start = readme.indexOf('| Fixture | Bytes in | Bytes out | Reduction | Rules applied |');
