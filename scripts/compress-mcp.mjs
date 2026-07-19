@@ -5,14 +5,14 @@ import { readFileSync } from 'node:fs';
 import { loadState, saveState, recordDiagnostic, recordSavings } from './lib/state.mjs';
 import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
 import { locateText } from './lib/read-format.mjs';
-
-const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
+import { loadConfig } from './lib/config.mjs';
+import { appendTeePath, teeOriginalOutput } from './lib/tee.mjs';
 const BASE64_RE = /(?:data:[^,;\s]+;base64,)?[A-Za-z0-9+/]{257,}={0,2}/g;
 
-function isDisabled() {
-  const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
-  const flags = raw.split(',').map((s) => s.trim());
-  return flags.includes('mcp') || flags.includes('all');
+function isDisabled(config) {
+  const flags = Array.isArray(config?.disable) ? config.disable : [];
+  const normalized = flags.map((flag) => String(flag).toLowerCase());
+  return normalized.includes('mcp') || normalized.includes('all');
 }
 
 function eventName(payload) {
@@ -54,16 +54,21 @@ function collapseHomogeneousTopLevelArray(value) {
 
 function transformText(text) {
   let transformed = text;
+  let lossy = false;
   try {
     const parsed = JSON.parse(text);
-    transformed = JSON.stringify(collapseHomogeneousTopLevelArray(parsed));
+    const collapsed = collapseHomogeneousTopLevelArray(parsed);
+    lossy = JSON.stringify(collapsed) !== JSON.stringify(parsed);
+    transformed = JSON.stringify(collapsed);
   } catch {
     // Not JSON; base64 truncation still applies to raw text.
   }
 
-  return transformed.replace(BASE64_RE, (match) => (
-    `${match.slice(0, 64)}[tokenslim: ${match.length - 64} base64 chars omitted]`
-  ));
+  transformed = transformed.replace(BASE64_RE, (match) => {
+    lossy = true;
+    return `${match.slice(0, 64)}[tokenslim: ${match.length - 64} base64 chars omitted]`;
+  });
+  return { text: transformed, lossy };
 }
 
 function main(input) {
@@ -74,7 +79,8 @@ function main(input) {
     return;
   }
 
-  if (isDisabled()) {
+  const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  if (isDisabled(config)) {
     recordDiagnosticBestEffort(payload, 'disabled');
     passThrough(payload);
     return;
@@ -94,7 +100,8 @@ function main(input) {
     passThrough(payload);
     return;
   }
-  if (text.length < MIN_CHARS) {
+  const minChars = Number.isFinite(config.minChars) ? config.minChars : 500;
+  if (text.length < minChars) {
     recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
     passThrough(payload);
     return;
@@ -109,7 +116,7 @@ function main(input) {
     return;
   }
 
-  const saved = text.length - compressed.length;
+  const saved = text.length - compressed.text.length;
   const ratio = text.length > 0 ? saved / text.length : 0;
   if (ratio < 0.1) {
     recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
@@ -117,11 +124,19 @@ function main(input) {
     return;
   }
 
-  const updatedToolOutput = locator.set(compressed);
+  const recoveryPath = teeOriginalOutput(text, {
+    sessionId: payload?.session_id,
+    toolUseId: payload?.tool_use_id,
+    config,
+    env: process.env,
+    lossy: compressed.lossy,
+    failed: Boolean(payload?.tool_response?.stderr || payload?.tool_response?.exitCode || payload?.tool_response?.exit_code),
+  });
+  const updatedToolOutput = locator.set(appendTeePath(compressed.text, recoveryPath));
   try {
     const state = loadState(payload?.session_id);
     recordDiagnostic(state, { tool: 'MCP', event: eventName(payload), outcome: 'compressed' });
-    recordSavings(state, { tool: 'MCP', bytesIn: text.length, bytesOut: compressed.length });
+    recordSavings(state, { tool: 'MCP', bytesIn: Buffer.byteLength(text, 'utf8'), bytesOut: Buffer.byteLength(appendTeePath(compressed.text, recoveryPath), 'utf8'), command: payload?.tool_name || 'MCP', cwd: payload?.cwd });
     saveState(payload?.session_id, state);
   } catch {
     // savings are best-effort

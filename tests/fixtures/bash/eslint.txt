@@ -1,0 +1,6 @@
+/work/src/app.js
+  2:3  warning  Unexpected console statement  no-console
+  4:1  error    Missing semicolon              semi
+
+/work/src/util.js
+  1:1  warning  Unexpected console statement  no-console

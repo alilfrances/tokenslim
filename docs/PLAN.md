@@ -1,8 +1,10 @@
 # tokenslim — Implementation Plan & Contracts
 
 > Historical implementation note: this plan captured the v2 delivery work before release. The
-> Edit/Write cache warmer, generic MCP compressor, and PreToolUse Read guard described here
-> shipped in `0.2.0`; treat remaining phase language below as design record, not current backlog.
+> Edit/Write cache warmer, generic MCP compressor, and PreToolUse Read guard shipped in `0.2.0`.
+> The v0.3.0 rewrite layer, command-aware Bash compressors, tee recovery, analytics, discovery,
+> doctor, and benchmark harness are documented in the README and release notes. Treat this file
+> as a design record, not current backlog.
 
 ## Task split (disjoint file ownership)
 
@@ -53,6 +55,6 @@ Ledger path: `~/.cache/tokenslim/<session_id>.json` (respect `XDG_CACHE_HOME`). 
 
 ## Env flags
 
-`TOKENSLIM_DISABLE` (csv: `bash,read,grep,edit,mcp,readguard,all`; `Glob` shares `grep`),
+`TOKENSLIM_DISABLE` (csv: `bash,read,grep,edit,mcp,readguard,rewrite,tee,all`; `Glob` shares `grep`),
 `TOKENSLIM_HOOK_RUNTIME` (`claude|codex` override), `TOKENSLIM_MIN_CHARS` (default 500),
 No `TOKENSLIM_DEBUG` runtime flag is shipped; `debug.log` is excluded from stats discovery.

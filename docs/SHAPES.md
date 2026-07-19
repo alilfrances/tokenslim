@@ -10,6 +10,26 @@ then uses the documented Codex `continue: false` PostToolUse path to suppress th
 original tool result with short stop text and send compact output via
 `hookSpecificOutput.additionalContext`.
 
+## PreToolUse Bash rewrite
+
+Claude Code live smoke (v0.3.0, Claude Code 2.1.215) accepted this response shape and
+reported the `permissionDecisionReason`; `updatedInput.command` carried the quieter command:
+
+```json
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "permissionDecisionReason": "tokenslim quiet-rewrite: npm-quiet",
+    "updatedInput": { "command": "npm install --loglevel=error --no-fund --no-audit" }
+  }
+}
+```
+
+Codex has not been live-verified with `updatedInput`. By default it receives only a
+`hookSpecificOutput.additionalContext` advisory; `TOKENSLIM_REWRITE_CODEX=1` opts into
+trying the Claude-style shape.
+
 ## Bash
 
 Claude Code shape:

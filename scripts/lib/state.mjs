@@ -6,6 +6,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { updateHistory } from './history.mjs';
 
 const CHARS_PER_TOKEN = 3; // rough heuristic for code/log text (~3 chars/token)
 const INPUT_USD_PER_MTOK = 3; // assumption: $3 / 1M input tokens (Claude Sonnet-class pricing)
@@ -56,12 +57,18 @@ export function saveState(sessionId, state) {
   try {
     mkdirSync(cacheDir(), { recursive: true });
     writeFileSync(statePath(sessionId), JSON.stringify(state), 'utf8');
+    // History receives only new savings events, rather than this cumulative ledger.
+    const events = Array.isArray(state?.historyEvents) ? state.historyEvents : [];
+    if (events.length && updateHistory(events)) {
+      delete state.historyEvents;
+      writeFileSync(statePath(sessionId), JSON.stringify(state), 'utf8');
+    }
   } catch {
     // best-effort only; never throw
   }
 }
 
-export function recordSavings(state, { tool, bytesIn, bytesOut }) {
+export function recordSavings(state, { tool, bytesIn, bytesOut, command, cwd }) {
   if (!state || typeof state !== 'object') return state;
   if (!state.savings || typeof state.savings !== 'object') state.savings = {};
   const key = String(tool ?? 'unknown');
@@ -70,6 +77,9 @@ export function recordSavings(state, { tool, bytesIn, bytesOut }) {
   entry.bytesIn += Number(bytesIn) || 0;
   entry.bytesOut += Number(bytesOut) || 0;
   state.savings[key] = entry;
+  // Kept only until saveState atomically incorporates this delta into daily history.
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push({ tool: key, bytesIn, bytesOut, command, cwd });
   return state;
 }
 

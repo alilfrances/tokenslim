@@ -5,13 +5,12 @@ import { readFileSync } from 'node:fs';
 import { loadState, saveState, recordDiagnostic, recordSavings, readCache } from './lib/state.mjs';
 import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
 import { hasBoundedRead, locateText, sha256 } from './lib/read-format.mjs';
+import { loadConfig } from './lib/config.mjs';
 
-const MIN_CHARS = Number(process.env.TOKENSLIM_MIN_CHARS) || 500;
-
-function isDisabled() {
-  const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
-  const flags = raw.split(',').map((s) => s.trim());
-  return flags.includes('read') || flags.includes('all');
+function isDisabled(config) {
+  const flags = Array.isArray(config?.disable) ? config.disable : [];
+  const normalized = flags.map((flag) => String(flag).trim().toLowerCase());
+  return normalized.includes('read') || normalized.includes('all');
 }
 
 function recordDiagnosticBestEffort(sessionId, event, outcome) {
@@ -73,7 +72,8 @@ function main(input) {
 
   const sessionId = payload && payload.session_id;
   const event = payload?.hook_event_name || 'PostToolUse';
-  if (isDisabled()) {
+  const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  if (isDisabled(config)) {
     recordDiagnosticBestEffort(sessionId, event, 'disabled');
     passThrough(payload);
     return;
@@ -96,7 +96,7 @@ function main(input) {
     passThrough(payload);
     return;
   }
-  if (text.length < MIN_CHARS) {
+  if (text.length < config.minChars) {
     recordDiagnosticBestEffort(sessionId, event, 'skippedBelowThreshold');
     passThrough(payload);
     return;
@@ -117,7 +117,7 @@ function main(input) {
         : `[tokenslim] ${filePath} unchanged since previous read in this session (${existing.headerLine} lines, sha256:${hash.slice(0, 12)}). Content already in context above.`;
       const updatedToolOutput = locator.set(stub);
       recordDiagnostic(state, { tool: 'Read', event, outcome: 'deduped' });
-      recordSavings(state, { tool: fromEdit ? 'Edit' : 'Read', bytesIn: text.length, bytesOut: stub.length });
+      recordSavings(state, { tool: fromEdit ? 'Edit' : 'Read', bytesIn: text.length, bytesOut: stub.length, command: toolInput?.file_path || 'Read', cwd: payload?.cwd });
       saveState(sessionId, state);
       process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
       return;
@@ -135,7 +135,7 @@ function main(input) {
   if (ratio >= 0.1) {
     const updatedToolOutput = locator.set(slimmed);
     recordDiagnostic(state, { tool: 'Read', event, outcome: 'compressed' });
-    recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: slimmed.length });
+    recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: slimmed.length, command: toolInput?.file_path || 'Read', cwd: payload?.cwd });
     saveState(sessionId, state);
     process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
     return;

@@ -47,6 +47,18 @@ test('Read guard emits advisory additionalContext above line threshold', () => {
   });
 });
 
+test('Read guard honors project config while environment retains priority', () => {
+  withTemp((dir) => {
+    const filePath = join(dir, 'large.txt');
+    writeFileSync(filePath, 'x\n'.repeat(6), 'utf8');
+    writeFileSync(join(dir, '.tokenslim.json'), JSON.stringify({ readGuardLines: 5 }), 'utf8');
+    const configured = run({ ...payload(filePath), cwd: dir }, { HOME: dir, XDG_CONFIG_HOME: join(dir, 'missing') });
+    assert.match(JSON.parse(configured.stdout).hookSpecificOutput.additionalContext, /7 lines/);
+    const overridden = run({ ...payload(filePath), cwd: dir }, { HOME: dir, XDG_CONFIG_HOME: join(dir, 'missing'), TOKENSLIM_READ_GUARD_LINES: '10' });
+    assert.equal(overridden.stdout, '');
+  });
+});
+
 test('Read guard stays silent below threshold and when offset or limit is present', () => {
   withTemp((dir) => {
     const filePath = join(dir, 'small.txt');

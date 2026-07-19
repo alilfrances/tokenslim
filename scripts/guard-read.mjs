@@ -4,14 +4,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { readFileSync as readStdinSync } from 'node:fs';
 import { preToolUseAdditionalContextOutput } from './lib/hook-output.mjs';
+import { loadConfig } from './lib/config.mjs';
 
 const DEFAULT_THRESHOLD = 2000;
 const CHARS_PER_TOKEN = 3;
 
-function isDisabled() {
-  const raw = (process.env.TOKENSLIM_DISABLE || '').toLowerCase();
-  const flags = raw.split(',').map((s) => s.trim());
-  return flags.includes('readguard') || flags.includes('all');
+function isDisabled(config) {
+  const flags = Array.isArray(config?.disable) ? config.disable : [];
+  const normalized = flags.map((flag) => String(flag).trim().toLowerCase());
+  return normalized.includes('readguard') || normalized.includes('all');
 }
 
 function countLines(text) {
@@ -29,7 +30,8 @@ function main(inputText) {
   } catch {
     return;
   }
-  if (isDisabled()) return;
+  const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  if (isDisabled(config)) return;
 
   const toolInput = payload?.tool_input || {};
   const filePath = toolInput.file_path;
@@ -42,7 +44,7 @@ function main(inputText) {
     return;
   }
 
-  const threshold = Number(process.env.TOKENSLIM_READ_GUARD_LINES) || DEFAULT_THRESHOLD;
+  const threshold = Number.isFinite(config.readGuardLines) ? config.readGuardLines : DEFAULT_THRESHOLD;
   const lines = countLines(content);
   if (lines <= threshold) return;
 
