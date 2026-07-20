@@ -405,6 +405,41 @@ of pipeline reductions for stdout-only fixtures, and nonzero for stderr-carried 
 6. Concurrent hook writes to the same session ledger are read-modify-write races
    (parallel tool calls); acceptable for best-effort stats, but note it in state.mjs
    docs and make `saveState` write via temp-file + rename like history.mjs already does.
+7. `guard-read.mjs` reads the entire file into memory just to count lines; a Read
+   aimed at a multi-hundred-MB artifact makes the PreToolUse hook pay that cost.
+   Stream-count with a byte cap (e.g. stop at 5MB and report ">N lines"), or gate on
+   `statSync().size` first.
+8. `compress-edit.mjs` reads `TOKENSLIM_READ_DEFAULT_LINES` straight from
+   `process.env` instead of the config loader — the only knob that bypasses config
+   layering. Route it through `loadConfig` like the others.
+9. Marker collision: `markCompression` and `appendTeePath` key off a literal
+   `[tokenslim:` substring, so tool output that already contains that text (e.g.
+   grepping this repo, or reading a tee log) suppresses the rules marker or attaches
+   the tee path to the wrong bracket. Low impact; fix by always appending tokenslim's
+   own marker as a fresh final line instead of pattern-matching existing text.
+
+---
+
+## Open questions (not fixable locally — need live-runtime verification; track explicitly)
+
+1. **Codex `continue:false` UX, even when detection is correct.** By design, every
+   compressed PostToolUse under Codex ends the model turn with a stop reason and
+   re-injects content via `additionalContext`. Whether Codex resumes smoothly or the
+   agent perceives repeated interruptions is unverified from this repo. Needs a live
+   Codex smoke session; if disruptive, consider defaulting the Codex adapter to
+   advisory/no-op until `updatedToolOutput` (or equivalent) is documented.
+2. **SHAPES drift.** The entire replacement mechanism rests on docs/SHAPES.md
+   (empirical, Claude Code 2.1.215, July 2026). The Read cache-warm feature
+   additionally assumes `file.content` is raw text with no line-number prefixes — if
+   a Claude release changes that, dedup silently never fires (safe, but all Read/Edit
+   savings vanish with no signal). Add a doctor check: run a self-probe Read via
+   transcript inspection or compare a known file's hash against the recorded cache
+   entry, and surface "shape drift suspected" instead of failing silent.
+3. `dedupStackTraces` received lighter adversarial scrutiny than the other rules. By
+   construction it only elides *exact* duplicate traces/frames (marked, counted), so
+   false-positive risk is structurally low; its trace-start heuristic
+   (`^\s*at\s+\S`) can misgroup prose beginning with "at ...", which affects grouping
+   but not content retention. Verify with a prose fixture when touching WP1–WP3.
 
 ---
 
@@ -420,4 +455,7 @@ of pipeline reductions for stdout-only fixtures, and nonzero for stderr-carried 
    - Read → Edit (file with trailing spaces + blank runs) → Edit succeeds first try.
    - Re-read unchanged file → stub with escape-hatch text; bounded re-read returns
      full content.
+   - Read → Edit → re-read (unbounded) → stub fires (verifies Edit/Write cache-warm
+     hash parity between `tool_response.file.content` and on-disk bytes — the load-
+     bearing SHAPES assumption).
 4. Confirm no `continue:false` ever reaches a Claude runtime (grep transcript).
