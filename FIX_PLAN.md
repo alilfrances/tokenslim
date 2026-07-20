@@ -37,22 +37,40 @@ rest in any order. WPs are independent unless noted.
 **Files:** `scripts/lib/pipeline.mjs` (`isTestOutput`, `SUMMARY_RE`,
 `summarizeTestRunners`), `tests/pipeline.test.mjs`
 
-**Defect.** `isTestOutput` uses one case-insensitive regex; the alternative
-`(?:^|\s)(?:FAIL|PASS)\s+\S+` matches ordinary prose such as `pass the event` or
-`fail gracefully` in comments/docs/source. Once matched with no failure lines present,
-the passing branch keeps only `SUMMARY_RE` lines — for prose that is usually **zero
-lines**. Confirmed end-to-end: `cat` of a 5KB guide containing "pass the token" came
-back as a bare marker (0 content bytes). Independently confirmed by a user report:
-reading non-test Qt C++ sources repeatedly triggered `summarizeTestRunners` (C++ code
-is full of "pass"/"passed" in comments and identifier-adjacent prose).
+**Defect.** `isTestOutput` uses one case-insensitive regex with two over-broad
+alternatives, and its false positives are amplified by a boundary inconsistency with
+the protective gates:
+
+- `(?:^|\s)(?:FAIL|PASS)\s+\S+` matches ordinary prose such as `pass the event` or
+  `fail gracefully` in comments/docs/source.
+- `::.*(?:PASSED|FAILED)` was written for pytest node-ids
+  (`tests/foo.py::test_bar PASSED`) but has **no word boundary and no anchor**, so it
+  substring-matches C++/Rust/PHP scoped identifiers: `Status::PREPARE_FAILED`,
+  `State::UPLOAD_PASSED`, `crate::mod::TEST_PASSED`. Confirmed against a real user
+  report (Qt C++ codebase): an 11-line C++ snippet containing
+  `Status::PREPARE_FAILED` classifies as test output.
+- **Why the protective gate doesn't save it:** `failureOutput`/`FAIL_LINE_RE` use
+  `\bFAILED\b` — in `PREPARE_FAILED` the underscore is a word character, so there is
+  no boundary and the failure gate does NOT trip. The file then takes the *passing*
+  branch, which keeps only `SUMMARY_RE` lines — for source/prose that is usually
+  **zero lines**. Confirmed: the C++ snippet compresses 792 → 0 bytes. (Bare
+  `Status::FAILED` *does* trip the gate and passes through untouched — so codebases
+  using underscore-compound enum values like `PREPARE_FAILED`/`UPLOAD_FAILED` hit the
+  worst path systematically, matching the user's "triggered a lot in one codebase"
+  observation.)
+
+Also confirmed end-to-end: `cat` of a 5KB guide containing "pass the token" came back
+as a bare marker (0 content bytes).
 
 **Fix spec.**
 1. Make runner detection case-sensitive and anchored to real runner formats, e.g.:
    `^(?:PASS|FAIL)\s+\S+` (jest/vitest), `^ok\s+\d`, `^not ok\s`, `^\d+ passing\b`,
    `Test Suites:`, `Test Files\s`, `^test result:`, `^=+ .* (?:passed|failed).* =+$`,
-   `^(?:PASSED|FAILED|ERROR)\s*:` , `::.*(?:PASSED|FAILED)`.
-   Drop the bare `cargo test` / `go test` substring alternatives (they match prose
-   *about* those commands).
+   `^(?:PASSED|FAILED|ERROR)\s*:`. The pytest node-id alternative must require the
+   status as a standalone terminal word: `::\S+\s+(?:PASSED|FAILED|ERROR|SKIPPED)\s*$`
+   (case-sensitive) — never a bare `::.*FAILED` substring, which matches scoped
+   identifiers like `Status::PREPARE_FAILED`. Drop the bare `cargo test` / `go test`
+   substring alternatives (they match prose *about* those commands).
 2. Require **two distinct** signal lines, or one signal line plus a summary line,
    before classifying output as test output.
 3. In the passing branch: if the filtered result is empty, return the input unchanged
@@ -64,8 +82,16 @@ is full of "pass"/"passed" in comments and identifier-adjacent prose).
 **Acceptance tests.**
 - Prose/source fixtures containing "pass the X", "should pass", "fail gracefully",
   a Qt C++ snippet with `// pass ownership to the caller` → byte-identical output.
+- A C++ scoped-enum fixture (`enum class Status { PREPARE_FAILED, UPLOAD_PASSED };`
+  plus usage `Status::PREPARE_FAILED`) → byte-identical output. Cover Rust
+  (`crate::state::TEST_PASSED`) and lowercase variants too.
+- A real pytest node-id line (`tests/test_x.py::test_y PASSED`) still classifies and
+  summarizes.
 - Existing jest/pytest/cargo fixtures still summarize as before.
 - Empty-result guard: any input whose summarization yields '' passes through.
+- Boundary-consistency check: any token that trips `isTestOutput` in a "failure-ish"
+  form must also be visible to the failure gates, or must not trip detection at all
+  (no more underscore-compound blind spot).
 
 ---
 
