@@ -2,8 +2,10 @@
 // Ledger lives at $XDG_CACHE_HOME/tokenslim/<sessionId>.json (or ~/.cache/tokenslim/...).
 // All I/O is best-effort: any failure (permissions, corrupt JSON, missing dirs) yields a
 // fresh/no-op state rather than throwing, so hooks never crash the tool pipeline.
+// Concurrent hooks can still race at the read-modify-write level, so ledger totals are
+// best-effort. Writes themselves are atomic (temp file + rename), never torn JSON.
 
-import { chmodSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { updateHistory } from './history.mjs';
@@ -59,8 +61,15 @@ function secureWriteState(sessionId, state) {
   const path = statePath(sessionId);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   try { chmodSync(directory, 0o700); } catch { /* best effort on non-POSIX filesystems */ }
-  writeFileSync(path, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
-  try { chmodSync(path, 0o600); } catch { /* best effort on non-POSIX filesystems */ }
+  const temp = `${path}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+  try {
+    writeFileSync(temp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 });
+    renameSync(temp, path);
+    try { chmodSync(path, 0o600); } catch { /* best effort on non-POSIX filesystems */ }
+  } finally {
+    // A failed write/rename must not leave sensitive ledger contents behind.
+    try { unlinkSync(temp); } catch { /* renamed or unavailable */ }
+  }
 }
 
 export function saveState(sessionId, state) {

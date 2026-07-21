@@ -13,27 +13,42 @@ function normalizeNewlines(text) {
   return String(text ?? '').replace(/\r\n/g, '\n');
 }
 
-function isProgressNoise(line) {
+function isProgressNoise(line, { buildProgress = false } = {}) {
   const trimmed = line.trim();
   if (!trimmed) return false;
   if (/100%/.test(trimmed)) return false;
-  if (/^[|/\\-]\s+/.test(trimmed)) return true;
+  // A leading dash is also Markdown/YAML/CLI syntax. Only treat it as a
+  // spinner when it is bare or followed by a counter/progress bar, never prose.
+  if (/^[|/\\-]$/.test(trimmed)) return true;
+  if (/^[|/\\-]\s+(?=[\d\[]|(?:downloading|extracting|pulling|waiting|verifying)(?:\s|$))/i.test(trimmed)) return true;
   if (/\[[=>#.\-\s]{8,}\]\s*\d{1,3}%?/.test(trimmed)) return true;
   if (/\b(?:Downloading|Extracting|Pulling fs layer|Waiting|Verifying Checksum)\b.*\[[=>#.\-\s]{8,}\]/i.test(trimmed)) return true;
+  // Cargo prints ordinary successful build progress on stderr, one crate per line.
+  // Do not apply this broad rule to generic stdout: source/prose may begin with
+  // the same verbs. Warnings remain verbatim in either channel.
+  if (buildProgress && /^(?:Compiling|Checking|Building)\s+\S+/i.test(trimmed)) return true;
   if (/\b(?:npm|pip|cargo|docker|yarn|pnpm)\b.*\b\d{1,3}%\b/i.test(trimmed)) return true;
   if (/^(?:progress|download(?:ing)?|reify|fetch)\b.*\b\d{1,3}%/i.test(trimmed)) return true;
   return false;
 }
 
-export function stripProgressNoise(text) {
+export function stripProgressNoise(text, options = {}) {
   const lines = normalizeNewlines(text).split('\n');
   const kept = [];
+  let omitted = 0;
   for (const line of lines) {
     const parts = line.split(/\r|\\r/g);
     const final = parts[parts.length - 1];
-    if (isProgressNoise(final)) continue;
+    if (isProgressNoise(final, options)) {
+      omitted += 1;
+      continue;
+    }
     kept.push(final);
   }
+  // The final split element is only the input's trailing newline; do not turn it
+  // into an extra blank line before the elision marker.
+  while (kept.length > 0 && kept[kept.length - 1] === '') kept.pop();
+  if (omitted > 0) kept.push(`${MARKER_PREFIX} ${omitted} progress lines omitted]`);
   return kept.join('\n').replace(/\n+$/g, '');
 }
 
@@ -50,9 +65,26 @@ function fingerprintLine(line) {
     .trim();
 }
 
+function commonPrefixLength(left, right) {
+  const limit = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < limit && left[index] === right[index]) index += 1;
+  return index;
+}
+
+function hasStrongRawSimilarity(left, right) {
+  if (commonPrefixLength(left, right) >= 16) return true;
+  const leftTokens = left.match(/[\p{L}\p{N}_]+/gu) || [];
+  const rightTokens = right.match(/[\p{L}\p{N}_]+/gu) || [];
+  if (!leftTokens.length || !rightTokens.length) return false;
+  const rightSet = new Set(rightTokens);
+  const shared = leftTokens.filter((token) => rightSet.has(token)).length;
+  return shared / Math.max(leftTokens.length, rightTokens.length) >= 0.6;
+}
+
 function flushRepeat(buffer, output) {
-  if (buffer.length >= 3) {
-    output.push(buffer[0], `${MARKER_PREFIX} ${buffer.length} similar lines collapsed]`);
+  if (buffer.length >= 4) {
+    output.push(buffer[0], `${MARKER_PREFIX} ${buffer.length - 1} more similar lines collapsed]`);
   } else {
     output.push(...buffer);
   }
@@ -63,7 +95,6 @@ export function collapseRepeatedLines(text) {
   const output = [];
   let buffer = [];
   let fp = '';
-  let gap = [];
 
   for (const line of lines) {
     const current = fingerprintLine(line);
@@ -72,49 +103,45 @@ export function collapseRepeatedLines(text) {
       buffer = [];
       fp = '';
       output.push(line);
-      gap = [];
       continue;
     }
 
     if (buffer.length === 0) {
       buffer = [line];
       fp = current;
-      gap = [];
       continue;
     }
 
-    if (current === fp) {
+    // Do not bridge a run across a different line: that line may be a unique
+    // warning. Fingerprints alone are also insufficient for numbered listings.
+    if (current === fp && hasStrongRawSimilarity(buffer[0], line)) {
       buffer.push(line);
-      gap = [];
-      continue;
-    }
-
-    if (gap.length === 0 && line.trim().length < 120) {
-      gap = [line];
       continue;
     }
 
     flushRepeat(buffer, output);
-    output.push(...gap);
     buffer = [line];
     fp = current;
-    gap = [];
   }
 
   flushRepeat(buffer, output);
-  output.push(...gap);
   return output.join('\n').replace(/\n+$/g, '');
 }
 
 const SUMMARY_RE = /(?:\b\d+\s+(?:failed|passed|skipped|error|errors|failures?|tests?|test files?)\b|Test Files|Tests|Duration|test result:|^ok\s+|^FAIL\b|^PASS\b|compiled with|Finished\b)/i;
 const FAIL_LINE_RE = /\b(?:FAILED|FAIL|failed|panicked|panic|AssertionError|Error:|Exception:)\b/;
+const TEST_SIGNAL_RE = /^(?:PASS|FAIL)\s+\S+|^ok\s+\d|^not ok\s|^\d+ passing\b|^Test Suites:|^Test Files\s|^test result:|^=+ .* (?:passed|failed).* =+$|^(?:PASSED|FAILED|ERROR)\s*:|^.*::\S+\s+(?:PASSED|FAILED|ERROR|SKIPPED)\s*$/;
+const TEST_SUMMARY_RE = /^(?:Test Suites:|Test Files\s|Tests\s+|Duration\b|test result:|=+ .* (?:passed|failed).* =+$|\d+\s+(?:passed|failed|skipped|error|errors|failures?)\b)/;
 
 function isPassingTestLine(line) {
   return /\b(?:PASSED|PASS|ok)\b/.test(line) && !FAIL_LINE_RE.test(line);
 }
 
 function isTestOutput(lines) {
-  return lines.some((line) => /(?:^|\s)(?:FAIL|PASS)\s+\S+|cargo test|go test|test result:|={5,}.*(?:passed|failed)|::.*(?:PASSED|FAILED)|Test Files|Tests\s+\d+/i.test(line));
+  // Repeated copies of the same line are not independent evidence that this is
+  // runner output (logs and source snippets can contain them too).
+  const signals = [...new Set(lines.filter((line) => TEST_SIGNAL_RE.test(line)))];
+  return signals.length >= 2 || (signals.length === 1 && lines.some((line) => TEST_SUMMARY_RE.test(line)));
 }
 
 export function summarizeTestRunners(text) {
@@ -123,7 +150,14 @@ export function summarizeTestRunners(text) {
 
   const hasFailure = lines.some((line) => FAIL_LINE_RE.test(line));
   if (!hasFailure) {
-    return lines.filter((line) => SUMMARY_RE.test(line) && !isPassingTestLine(line)).join('\n').replace(/\n+$/g, '');
+    const kept = lines.filter((line) => SUMMARY_RE.test(line) && !isPassingTestLine(line));
+    // Two runner signals alone are not enough to replace output: retain the
+    // original unless a non-passing summary line remains actionable.
+    if (kept.length === 0) return text;
+    const omitted = lines.length - kept.length;
+    const output = [...kept, ...(omitted > 0 ? [`${MARKER_PREFIX} ${omitted} passing test lines omitted]`] : [])]
+      .join('\n').replace(/\n+$/g, '');
+    return output || text;
   }
 
   const kept = [];
@@ -158,7 +192,10 @@ export function summarizeTestRunners(text) {
     if (SUMMARY_RE.test(line) && !isPassingTestLine(line)) kept.push(line);
   }
 
-  return kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/g, '');
+  const omitted = lines.length - kept.length;
+  const output = [...kept, ...(omitted > 0 ? [`${MARKER_PREFIX} ${omitted} test runner lines omitted]`] : [])]
+    .join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/g, '');
+  return output || text;
 }
 
 function isTraceStart(line) {
@@ -188,10 +225,10 @@ function compressFrames(traceLines) {
       }
       const key = frame.join('\n');
       if (key === previousFrame) {
-      repeat += 1;
-      continue;
-    }
-    flush();
+        repeat += 1;
+        continue;
+      }
+      flush();
       out.push(...frame);
       previousFrame = key;
       continue;
@@ -292,13 +329,29 @@ export function compressBashOutput(text, opts = {}) {
     ['dedupStackTraces', dedupStackTraces],
   ]) {
     const next = fn(output);
-    if (next !== output) rulesApplied.push(name);
+    if (next !== output) {
+      // Test summaries discard earlier repetitive runner lines (and their marker),
+      // so do not report a collapse that is absent from the final replacement.
+      if (name === 'summarizeTestRunners') {
+        const collapseIndex = rulesApplied.lastIndexOf('collapseRepeatedLines');
+        if (collapseIndex >= 0 && !/more similar lines collapsed\]/.test(next)) rulesApplied.splice(collapseIndex, 1);
+      }
+      rulesApplied.push(name);
+    }
     output = next;
   }
 
   const truncated = headTailTruncate(output, opts);
   if (truncated !== output) rulesApplied.push('headTailTruncate');
   output = truncated;
+
+  // Never replace ordinary output with an empty or near-empty summary. Test
+  // runner summaries are explicitly allowed to be compact; all other output
+  // must retain at least 10% of its original bytes.
+  if ((input && !output) || (input && !isTestOutput(normalizeNewlines(input).split('\n')) && byteLength(output) / bytesIn < 0.1)) {
+    output = input;
+    rulesApplied.length = 0;
+  }
 
   return { text: output, stats: { bytesIn, bytesOut: byteLength(output), rulesApplied } };
 }

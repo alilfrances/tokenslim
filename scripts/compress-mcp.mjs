@@ -7,7 +7,23 @@ import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs'
 import { locateText } from './lib/read-format.mjs';
 import { loadConfig } from './lib/config.mjs';
 import { appendTeePath, teeOriginalOutput } from './lib/tee.mjs';
-const BASE64_RE = /(?:data:[^,;\s]+;base64,)?[A-Za-z0-9+/]{257,}={0,2}/g;
+// Raw base64-looking text is often a hex dump or an identifier the caller needs.
+// Only data URLs are unambiguously base64; require canonical padding for raw blobs.
+const DATA_BASE64_RE = /data:[^,;\s]+;base64,[A-Za-z0-9+/]+={0,2}/g;
+const RAW_BASE64_RE = /[A-Za-z0-9+/]{1022,}={1,2}/g;
+
+function isPaddedBase64(value) {
+  const padding = value.match(/=+$/)?.[0].length || 0;
+  return padding > 0 && padding <= 2 && value.length % 4 === 0
+    && /^[A-Za-z0-9+/]+={1,2}$/.test(value);
+}
+
+function truncateBase64(text) {
+  const truncate = (match) => `${match.slice(0, 64)}[tokenslim: ${match.length - 64} base64 chars omitted]`;
+  // Do the unambiguous data URL form first; raw matching then cannot split it.
+  const dataCollapsed = text.replace(DATA_BASE64_RE, truncate);
+  return dataCollapsed.replace(RAW_BASE64_RE, (match) => isPaddedBase64(match) ? truncate(match) : match);
+}
 
 function isDisabled(config) {
   const flags = Array.isArray(config?.disable) ? config.disable : [];
@@ -64,11 +80,9 @@ function transformText(text) {
     // Not JSON; base64 truncation still applies to raw text.
   }
 
-  transformed = transformed.replace(BASE64_RE, (match) => {
-    lossy = true;
-    return `${match.slice(0, 64)}[tokenslim: ${match.length - 64} base64 chars omitted]`;
-  });
-  return { text: transformed, lossy };
+  const base64Collapsed = truncateBase64(transformed);
+  if (base64Collapsed !== transformed) lossy = true;
+  return { text: base64Collapsed, lossy };
 }
 
 function main(input) {

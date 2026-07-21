@@ -7,7 +7,6 @@ import { DEFAULT_READ_LINE_LIMIT, readFileRaw, sha256 } from './lib/read-format.
 import { postToolUseNoopOutput } from './lib/hook-output.mjs';
 import { loadConfig } from './lib/config.mjs';
 
-const READ_LINE_LIMIT = Number(process.env.TOKENSLIM_READ_DEFAULT_LINES) || DEFAULT_READ_LINE_LIMIT;
 
 function isDisabled(config) {
   const flags = Array.isArray(config?.disable) ? config.disable : [];
@@ -42,7 +41,7 @@ function isSuccessful(payload) {
   return true;
 }
 
-function updateCache(payload) {
+function updateCache(payload, config) {
   const toolName = payload?.tool_name;
   if (toolName !== 'Edit' && toolName !== 'Write') return 'unsupportedTool';
   if (!isSuccessful(payload)) return 'toolFailed';
@@ -57,7 +56,8 @@ function updateCache(payload) {
 
   const text = readFileRaw(filePath);
   const lineCount = text.split('\n').length;
-  if (lineCount > READ_LINE_LIMIT) return 'skippedOversized';
+  const lineLimit = Number.isFinite(config?.readDefaultLines) ? config.readDefaultLines : DEFAULT_READ_LINE_LIMIT;
+  if (lineCount > lineLimit) return 'skippedOversized';
 
   cache.set(filePath, {
     hash: sha256(text),
@@ -84,7 +84,7 @@ function main(input) {
   }
 
   try {
-    recordDiagnosticBestEffort(payload, updateCache(payload));
+    recordDiagnosticBestEffort(payload, updateCache(payload, config));
   } catch {
     recordDiagnosticBestEffort(payload, 'failedOpen');
   }

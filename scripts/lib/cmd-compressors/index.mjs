@@ -1,4 +1,5 @@
 import { tokenizeCommand } from '../rewrite-rules.mjs';
+import { skipLeadingEnvAssignments } from '../privacy.mjs';
 import * as git from './git.mjs';
 import * as packages from './package-managers.mjs';
 import * as tests from './test-runners.mjs';
@@ -7,12 +8,59 @@ import * as containers from './containers.mjs';
 
 const UNSAFE_SHELL = /\$\(|`|[\r\n<>;|&]/;
 const COMPRESSORS = [git, packages, tests, linters, containers];
+const KNOWN_EXECUTABLES = new Set([
+  'cargo', 'docker', 'eslint', 'git', 'go', 'jest', 'kubectl', 'npm', 'pip', 'pip3',
+  'pnpm', 'pytest', 'rspec', 'ruff', 'tsc', 'vitest', 'yarn',
+]);
+const LAUNCHER_VALUE_FLAGS = new Set(['-c', '--call', '-p', '--package']);
+
+function basename(token) {
+  return String(token ?? '').replace(/^["']|["']$/g, '').split(/[\\/]/).at(-1);
+}
+
+function nextExecutable(tokens, start) {
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === '--') return index + 1 < tokens.length ? index + 1 : -1;
+    if (LAUNCHER_VALUE_FLAGS.has(token)) { index += 1; continue; }
+    if (token.startsWith('--package=') || token.startsWith('--call=')) continue;
+    if (!token.startsWith('-')) return index;
+  }
+  return -1;
+}
+
+// Return the effective binary position without interpreting shell syntax. This shares
+// privacy.mjs's conservative leading-assignment walk, then unwraps only documented
+// package launchers so a command's output reaches the matching compressor.
+function executableIndex(tokens) {
+  const index = skipLeadingEnvAssignments(tokens);
+  if (index >= tokens.length) return -1;
+
+  const binary = basename(tokens[index]);
+  if (binary === 'npx') return nextExecutable(tokens, index + 1);
+  // Both pnpm and Yarn allow launcher flags before `exec`/`run` (for example,
+  // `pnpm --silent exec eslint`), so locate that subcommand with the same
+  // option-aware walk used to find npx's executable.
+  const candidateIndex = nextExecutable(tokens, index + 1);
+  const candidate = basename(tokens[candidateIndex]);
+  if (binary === 'pnpm' && candidate === 'exec') return nextExecutable(tokens, candidateIndex + 1);
+  if (binary === 'yarn') {
+    if (candidate === 'run' || candidate === 'exec') return nextExecutable(tokens, candidateIndex + 1);
+    // `yarn eslint` launches eslint, but preserve yarn's own install/test commands.
+    if (KNOWN_EXECUTABLES.has(candidate)) return candidateIndex;
+  }
+  return index;
+}
 
 export function commandMeta(command, extra = {}) {
   if (typeof command !== 'string' || UNSAFE_SHELL.test(command)) return null;
   const tokens = tokenizeCommand(command);
   if (!tokens?.length) return null;
-  return { ...extra, command, tokens, binary: tokens[0], subcommand: tokens[1] };
+  const binaryIndex = executableIndex(tokens);
+  if (binaryIndex < 0 || binaryIndex >= tokens.length) return null;
+  const binary = basename(tokens[binaryIndex]);
+  if (!binary) return null;
+  return { ...extra, command, tokens, binary, subcommand: basename(tokens[binaryIndex + 1]) };
 }
 
 function compileUserPattern(source) {

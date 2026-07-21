@@ -9,25 +9,27 @@ unbounded reads. Deterministic, prompt-cache safe, zero dependencies, fail-open.
 ## Fixture benchmark
 
 Generated with `node scripts/benchmark.mjs --format md` on the checked-in fixture corpus.
-These are reproducible byte reductions; real commands vary by project and tool output.
+“Pipeline” is the ideal command-aware compressor result; “E2E” is the production
+`compress-bash` hook result, including thresholds, failure gates, marker overhead, and
+realistic stderr routing for cargo and docker progress. Real commands vary by project.
 
-| Fixture | Bytes in | Bytes out | Reduction | Rules applied |
+| Fixture | Pipeline reduction | E2E bytes out | E2E reduction | Rules applied |
 | --- | ---: | ---: | ---: | --- |
-| cargo-build.txt | 2101 | 309 | 85.3% | stripAnsi, stripProgressNoise, collapseRepeatedLines, summarizeTestRunners |
-| docker-ps.txt | 232 | 168 | 27.6% | dockerTable |
-| docker-pull.txt | 2297 | 296 | 87.1% | stripProgressNoise, collapseRepeatedLines |
-| eslint.txt | 202 | 93 | 54.0% | linterRules |
-| git-diff.txt | 128 | 53 | 58.6% | gitDiff |
-| git-log.txt | 2120 | 2119 | 0.0% | stripProgressNoise |
-| git-status-porcelain.txt | 74 | 57 | 23.0% | gitStatus |
-| go-test-json.txt | 261 | 33 | 87.4% | goTestJson |
-| npm-install.txt | 4451 | 63 | 98.6% | packageManagerSummary |
-| npm-test-failing.txt | 2094 | 256 | 87.8% | stripAnsi, stripProgressNoise, summarizeTestRunners |
-| pytest-failing.txt | 2107 | 909 | 56.9% | stripProgressNoise, summarizeTestRunners |
-| pytest-passing.txt | 2053 | 81 | 96.1% | testRunnerSummary |
-| stacktrace-repeat.txt | 2133 | 586 | 72.5% | stripProgressNoise, dedupStackTraces |
-| tsc.txt | 238 | 46 | 80.7% | linterRules |
-| webpack-build.txt | 2102 | 2101 | 0.0% | stripProgressNoise |
+| cargo-build.txt | 91.9% | 701 | 66.6% | packageManagerSummary |
+| docker-ps.txt | 27.6% | 232 | 0.0% | dockerTable |
+| docker-pull.txt | 87.1% | 368 | 84.0% | stripProgressNoise, collapseRepeatedLines |
+| eslint.txt | 1.0% | 202 | 0.0% | linterDiagnostics |
+| git-diff.txt | 18.0% | 128 | 0.0% | gitDiff |
+| git-log.txt | 54.6% | 983 | 53.6% | gitLog |
+| git-status-porcelain.txt | 0.0% | 74 | 0.0% | gitStatus |
+| go-test-json.txt | 87.4% | 261 | 0.0% | goTestJson |
+| npm-install.txt | 96.9% | 172 | 96.1% | packageManagerSummary |
+| npm-test-failing.txt | 85.8% | 2094 | 0.0% | stripAnsi, stripProgressNoise, summarizeTestRunners |
+| pytest-failing.txt | 54.9% | 2107 | 0.0% | stripProgressNoise, summarizeTestRunners |
+| pytest-passing.txt | 96.1% | 112 | 94.5% | testRunnerSummary |
+| stacktrace-repeat.txt | 72.5% | 636 | 70.2% | stripProgressNoise, dedupStackTraces |
+| tsc.txt | 0.4% | 238 | 0.0% | linterDiagnostics |
+| webpack-build.txt | 0.0% | 2102 | 0.0% | stripProgressNoise |
 
 Re-read stubs can save roughly 99% when an unchanged file is read again. Dense unique output
 is intentionally left untouched. Savings compound because input tokens are re-sent every turn.
@@ -138,12 +140,12 @@ stop message while the compressed output is added through
   linters, and container tables; the generic fallback strips ANSI/progress noise, collapses
   repeated logs and stack traces, and head+tail truncates only outputs still over 40KB.
   Failing test names and error text stay **verbatim**.
-- **Read** — hashes file content per session. Re-reading an unchanged file returns a short
-  `[tokenslim] ... unchanged since previous read` stub instead of the full content. First
-  reads get whitespace-only slimming. **Comments and docstrings are never stripped**
-  (research shows a measurable task-accuracy drop when they are).
-- **Grep/Glob** — dedups identical match lines, collapses runs of matches from the same
-  file, groups huge glob listings by directory. Compact modes pass through untouched.
+- **Read** — hashes file content per session without changing the first read. Re-reading an
+  unchanged file returns a short `[tokenslim] ... unchanged since previous read` stub;
+  bounded reads provide an escape hatch when prior context is unavailable.
+- **Grep/Glob** — dedups identical match lines, collapses repeated match content while
+  retaining omitted locations, preserves context separators, and groups huge glob listings
+  by directory while retaining names up to a per-directory cap. Compact modes pass through untouched.
 - **Edit/Write** — after a successful edit of a previously-read file (or any Write, whose
   full content the model authored), rehashes the file so the *next* Read dedups to a stub
   instead of re-injecting the whole file. Read→edit→re-read is one of the most common
@@ -191,7 +193,7 @@ auto-detection is not enough. `Glob` shares the Grep hook and disable path.
 Optional JSON config layers merge in this order: built-in defaults, user
 `$XDG_CONFIG_HOME/tokenslim/config.json` (or `~/.config/...`), project
 `.tokenslim.json`, then environment variables. Malformed files are ignored. The file can
-set `minChars`, `disable`, `readGuardLines`, `tee` (`enabled`, `mode`, `maxFiles`),
+set `minChars`, `disable`, `readGuardLines`, `readDefaultLines`, `tee` (`enabled`, `mode`, `maxFiles`),
 `rewrite` (`enabled`, `exclude`, `dockerBuild`), and command `filters`. See
 [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) for rewrite configuration and guards.
 Project filters control successful-command output, so review `.tokenslim.json` in untrusted
@@ -204,7 +206,9 @@ path in the marker. Set `tee.mode` to `failures` or `never` to restrict recovery
 ### Privacy and local storage
 
 TokenSlim has no telemetry and performs no network requests. Session ledgers, aggregate
-history, transcript discovery, and recovery copies stay local. Analytics retain only command
+history, transcript discovery, and recovery copies stay local. Session-ledger writes are atomic,
+though concurrent tool calls may race at the best-effort read-modify-write accounting layer.
+Analytics retain only command
 families such as `git status`, never command arguments, URLs, headers, credentials, or inline
 environment values. Project paths remain in local history for project reports. Recovery logs
 contain the original raw output and may therefore contain sensitive data; disable them with
@@ -243,7 +247,7 @@ rather than drop detail.
 [Cortex](https://github.com/alilfrances/Cortex) and tokenslim are complementary and safe
 to run together: Cortex proactively *selects* which repo context enters the conversation
 (graph-ranked, token-budgeted bundles over MCP), while tokenslim reactively *compresses*
-tool results after they arrive. As of v0.3.0 the `mcp__*` hook also touches Cortex's MCP
+tool results after they arrive. As of v0.3.1 the `mcp__*` hook also touches Cortex's MCP
 results. JSON minification is lossless; marked base64 truncation is lossy and receives a
 recovery copy above the tee threshold. Homogeneous-array collapsing remains opt-in via
 `TOKENSLIM_MCP_ARRAYS=1`. To exempt MCP results entirely, set `TOKENSLIM_DISABLE=mcp`.
