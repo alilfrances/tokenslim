@@ -52,15 +52,20 @@ test('MCP minifies pretty JSON and records savings', () => {
   });
 });
 
-test('MCP truncates long base64-like runs', () => {
+test('MCP truncates explicit base64 but preserves base64-like identifiers and hex', () => {
   withTempCache((cacheDir) => {
-    const blob = 'A'.repeat(320);
-    const result = run(payload('sess-mcp-b64', `prefix ${blob} suffix`), {
-      XDG_CACHE_HOME: cacheDir,
-      TOKENSLIM_MIN_CHARS: '10',
+    const data = `data:application/octet-stream;base64,${'A'.repeat(320)}`;
+    const result = run(payload('sess-mcp-b64', `prefix ${data} suffix`), {
+      XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10',
     });
     const text = parseOutput(result).hookSpecificOutput.updatedToolOutput.content;
-    assert.match(text, /^prefix A{64}\[tokenslim: 256 base64 chars omitted\] suffix$/);
+    assert.match(text, /^prefix data:application\/octet-stream;base64,A{27}\[tokenslim: 293 base64 chars omitted\] suffix$/);
+
+    const raw = 'a'.repeat(512);
+    const untouched = run(payload('sess-mcp-hex', `prefix ${raw} suffix`), {
+      XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10',
+    });
+    assert.equal(untouched.stdout, '', 'unprefixed hex/base64-like text is not truncated');
   });
 });
 

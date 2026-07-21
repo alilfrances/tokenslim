@@ -6,6 +6,13 @@ const SUBCOMMAND_TOOLS = new Set([
   'cargo', 'composer', 'docker', 'gh', 'git', 'go', 'gradle', 'helm', 'kubectl',
   'mvn', 'npm', 'pip', 'pip3', 'pnpm', 'terraform', 'yarn',
 ]);
+const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+export function skipLeadingEnvAssignments(tokens = []) {
+  let index = 0;
+  while (index < tokens.length && ENV_ASSIGNMENT_RE.test(tokens[index])) index += 1;
+  return index;
+}
 
 function unquote(token) {
   const text = String(token || '');
@@ -29,8 +36,7 @@ export function commandFamily(command) {
   const tokens = tokenizeCommand(command);
   if (!tokens?.length) return '(unknown)';
 
-  let index = 0;
-  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index])) index += 1;
+  const index = skipLeadingEnvAssignments(tokens);
   const binary = safeName(tokens[index]);
   if (!binary) return '(other)';
 

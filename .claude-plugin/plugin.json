@@ -1,6 +1,6 @@
 {
   "name": "tokenslim",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Input-token compressor for Claude Code. Bundles PostToolUse hooks for Bash, Read, Edit|Write, mcp__.*, and Grep|Glob plus PreToolUse Bash quiet-rewrite and Read guard. Compresses tool results before they enter model context, keeps the Read dedup cache warm across Edit/Write, and warns before large unbounded reads. Deterministic, cache-safe heuristics. Zero dependencies.",
   "author": {
     "name": "Alil Kuizon"

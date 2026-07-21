@@ -86,14 +86,11 @@ export function teeOriginalOutput(text, {
   }
 }
 
-// Put the recovery location in an existing compression marker. The replacement is
-// deterministic for a stable session/tool-use id and deliberately does not add a
-// marker to otherwise lossless output.
+// Never attach a recovery path to a marker found in tool output: the command may
+// have printed a tokenslim example, or be reading a previous tee log. Our recovery
+// reference is always a new final marker owned by this invocation.
 export function appendTeePath(text, path) {
   if (!path) return String(text ?? '');
   const output = String(text ?? '');
-  if (/\[tokenslim: [^\]\n]*?\]/.test(output)) {
-    return output.replace(/\[tokenslim: ([^\]\n]*?)\]/, `[tokenslim: $1 full: ${path}]`);
-  }
   return `${output}${output ? '\n' : ''}[tokenslim: full: ${path}]`;
 }

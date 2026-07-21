@@ -86,17 +86,59 @@ export function benchmarkFixtures(directory = fixtureDirectory) {
   });
 }
 
+// These tools conventionally send their progress/build stream to stderr. Keeping that
+// split makes this exercise the same production gate as the PostToolUse hook.
+const STDERR_FIXTURES = new Set(['cargo-build.txt', 'docker-pull.txt']);
+
+function endToEndOutput(name, input, command) {
+  const response = STDERR_FIXTURES.has(name) ? { stdout: '', stderr: input } : { stdout: input, stderr: '' };
+  const payload = {
+    hook_event_name: 'PostToolUse', session_id: 'benchmark-e2e', tool_use_id: name,
+    cwd: root, tool_name: 'Bash', tool_input: { command }, tool_response: response,
+  };
+  const cache = mkdtempSync(join(tmpdir(), 'tokenslim-benchmark-e2e-'));
+  try {
+    const result = spawnSync(process.execPath, [join(root, 'scripts', 'compress-bash.mjs')], {
+      cwd: root, input: JSON.stringify(payload), encoding: 'utf8', timeout: 5_000,
+      env: { ...process.env, XDG_CACHE_HOME: cache, TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) },
+    });
+    if (result.status !== 0 || !result.stdout) return input;
+    const updated = JSON.parse(result.stdout)?.hookSpecificOutput?.updatedToolOutput;
+    if (!updated || typeof updated !== 'object') return input;
+    return `${updated.stdout || ''}${updated.stderr || ''}`;
+  } catch {
+    return input;
+  } finally {
+    rmSync(cache, { recursive: true, force: true });
+  }
+}
+
+/** Run fixtures through the actual Bash hook, including thresholds and ratio floor. */
+export function benchmarkEndToEndFixtures(directory = fixtureDirectory) {
+  return benchmarkFixtures(directory).map((result) => {
+    const input = readFileSync(join(directory, result.fixture), 'utf8');
+    const output = endToEndOutput(result.fixture, input, result.command);
+    const bytesIn = bytes(input);
+    const bytesOut = bytes(output);
+    return { ...result, bytesIn, bytesOut, reduction: reduction(bytesIn, bytesOut) };
+  });
+}
+
 function markdownCell(value) {
   // Escape backslashes before pipes so an existing backslash cannot neutralize the
   // delimiter escape (CodeQL js/incomplete-sanitization).
   return String(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, '<br>');
 }
 
-export function formatMarkdown(results) {
+export function formatMarkdown(results, endToEnd = null) {
+  const e2eByFixture = new Map((endToEnd || []).map((result) => [result.fixture, result]));
   const rows = [
-    '| Fixture | Bytes in | Bytes out | Reduction | Rules applied |',
+    '| Fixture | Pipeline reduction | E2E bytes out | E2E reduction | Rules applied |',
     '| --- | ---: | ---: | ---: | --- |',
-    ...results.map((result) => `| ${markdownCell(result.fixture)} | ${result.bytesIn} | ${result.bytesOut} | ${displayReduction(result.reduction)} | ${markdownCell(result.rulesApplied.join(', ') || 'none')} |`),
+    ...results.map((result) => {
+      const e2e = e2eByFixture.get(result.fixture);
+      return `| ${markdownCell(result.fixture)} | ${displayReduction(result.reduction)} | ${e2e ? e2e.bytesOut : '—'} | ${e2e ? displayReduction(e2e.reduction) : '—'} | ${markdownCell(result.rulesApplied.join(', ') || 'none')} |`;
+    }),
   ];
   return rows.join('\n');
 }
@@ -188,8 +230,9 @@ function main(args) {
   }
 
   const results = benchmarkFixtures();
+  const endToEnd = benchmarkEndToEndFixtures();
   const largest = results.reduce((current, result) => result.bytesIn > current.bytesIn ? result : current, results[0]);
-  const table = format === 'md' ? formatMarkdown(results) : formatText(results);
+  const table = format === 'md' ? formatMarkdown(results, endToEnd) : formatText(results);
   const latency = benchmarkHookLatency(readFileSync(join(fixtureDirectory, largest.fixture), 'utf8'));
   const latencyTable = format === 'md' ? formatLatencyMarkdown(latency) : formatLatencyText(latency);
   process.stdout.write(`${table}\n\n${latencyTable}\n`);

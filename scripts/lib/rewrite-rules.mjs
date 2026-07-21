@@ -33,7 +33,7 @@ export function tokenizeCommand(command) {
 }
 
 function hasVerboseFlag(tokens) {
-  return tokens.some((token) => /^(?:-v+|--verbose(?:=|$)|--debug(?:=|$)|--loglevel(?:=|$))/.test(token));
+  return tokens.some((token) => /^(?:-v+$|--verbose(?:=|$)|--debug(?:=|$)|--loglevel(?:=|$))/.test(token));
 }
 
 function hasAny(tokens, flags) {
@@ -83,8 +83,10 @@ export function rewriteCommand(command, config = {}) {
   if (binary === 'docker' && subcommand === 'build' && config?.rewrite?.dockerBuild === true) {
     return hasAny(tokens, ['-q', '--quiet']) ? null : append(command, tokens, ['--quiet'], 'docker-build-quiet');
   }
-  if (binary === 'mvn' || binary === 'gradle') {
-    return hasAny(tokens, ['-q', '--quiet']) ? null : append(command, tokens, ['-q'], `${binary}-quiet`);
+  // Maven's -q suppresses Surefire's "Tests run:" summary, which is needed to
+  // verify a test run. Gradle retains its outcome summary under --quiet.
+  if (binary === 'gradle') {
+    return hasAny(tokens, ['-q', '--quiet']) ? null : append(command, tokens, ['-q'], 'gradle-quiet');
   }
   return null;
 }
