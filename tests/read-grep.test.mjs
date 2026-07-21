@@ -37,7 +37,7 @@ function withTempCache(fn) {
 
 // ---------- Read ----------
 
-test('Read: confirmed shape {type:"text", file:{content,...}} slims and mirrors other fields', () => {
+test('Read: first full-file read is byte-identical and records no savings', () => {
   withTempCache((cacheDir) => {
     const content = fsReadFileSync(FIXTURE_SOURCE, 'utf8');
     const payload = {
@@ -61,21 +61,10 @@ test('Read: confirmed shape {type:"text", file:{content,...}} slims and mirrors 
     });
     assert.equal(result.status, 0);
     const out = parseOutput(result);
-    assert.ok(out, 'expected compression output for a heavily-whitespaced fixture');
-    const updated = out.hookSpecificOutput.updatedToolOutput;
-    assert.equal(updated.type, 'text');
-    assert.equal(updated.file.filePath, FIXTURE_SOURCE);
-    assert.equal(updated.file.startLine, 1);
-    assert.equal(updated.file.totalLines, content.split('\n').length);
-    // no trailing whitespace remains on any line
-    for (const line of updated.file.content.split('\n')) {
-      assert.equal(line, line.replace(/[ \t]+$/, ''));
-    }
-    // the 4-line blank run collapsed, so line count shrank
-    assert.ok(updated.file.numLines < content.split('\n').length);
-    assert.equal(updated.file.numLines, updated.file.content.split('\n').length);
+    assert.equal(out, undefined, 'first reads must pass through without mutation');
     const state = JSON.parse(fsReadFileSync(join(cacheDir, 'tokenslim', 'sess-read-1.json'), 'utf8'));
-    assert.deepEqual(state.diagnostics.Read.PostToolUse, { attempted: 1, compressed: 1 });
+    assert.deepEqual(state.diagnostics.Read.PostToolUse, { attempted: 1, skippedFirstRead: 1 });
+    assert.deepEqual(state.savings, {});
   });
 });
 
@@ -95,7 +84,7 @@ test('Read: second identical full-file read produces an unchanged-since stub', (
 
     const first = run(READ_SCRIPT, makePayload(), env);
     assert.equal(first.status, 0);
-    assert.ok(parseOutput(first));
+    assert.equal(parseOutput(first), undefined);
 
     const second = run(READ_SCRIPT, makePayload(), env);
     assert.equal(second.status, 0);
@@ -105,29 +94,34 @@ test('Read: second identical full-file read produces an unchanged-since stub', (
     assert.match(text, /unchanged since previous read in this session/);
     assert.match(text, new RegExp(FIXTURE_SOURCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(text, /sha256:[0-9a-f]{12}/);
+    assert.match(text, /re-read with offset\/limit \(bounded reads bypass this stub\)/);
   });
 });
 
-test('Read: offset/limit reads are never deduped even when content repeats', () => {
+test('Read: dedup ledger records UTF-8 bytes rather than JavaScript character counts', () => {
+  withTempCache((cacheDir) => {
+    const content = '😀'.repeat(30);
+    const payload = { session_id: 'sess-read-utf8', tool_name: 'Read', tool_input: { file_path: '/tmp/utf8.txt' }, tool_response: { content } };
+    const env = { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10' };
+    run(READ_SCRIPT, payload, env);
+    const out = parseOutput(run(READ_SCRIPT, payload, env));
+    const stub = out.hookSpecificOutput.updatedToolOutput.content;
+    const state = JSON.parse(fsReadFileSync(join(cacheDir, 'tokenslim', 'sess-read-utf8.json'), 'utf8'));
+    assert.equal(state.savings.Read.bytesIn, Buffer.byteLength(content));
+    assert.equal(state.savings.Read.bytesOut, Buffer.byteLength(stub));
+  });
+});
+
+test('Read: bounded read after a dedup stub returns full content', () => {
   withTempCache((cacheDir) => {
     const content = fsReadFileSync(FIXTURE_SOURCE, 'utf8');
-    const makePayload = () => ({
-      session_id: 'sess-read-partial',
-      tool_name: 'Read',
-      tool_input: { file_path: FIXTURE_SOURCE, offset: 1, limit: 5 },
-      tool_response: {
-        type: 'text',
-        file: { filePath: FIXTURE_SOURCE, content, numLines: content.split('\n').length, startLine: 1, totalLines: content.split('\n').length },
-      },
-    });
+    const fullPayload = { session_id: 'sess-read-partial', tool_name: 'Read', tool_input: { file_path: FIXTURE_SOURCE }, tool_response: { type: 'text', file: { filePath: FIXTURE_SOURCE, content, numLines: content.split('\n').length, startLine: 1, totalLines: content.split('\n').length } } };
+    const boundedPayload = { ...fullPayload, tool_input: { file_path: FIXTURE_SOURCE, offset: 1, limit: 5 } };
     const env = { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10' };
-
-    run(READ_SCRIPT, makePayload(), env);
-    const second = run(READ_SCRIPT, makePayload(), env);
-    const out = parseOutput(second);
-    if (out) {
-      assert.doesNotMatch(out.hookSpecificOutput.updatedToolOutput.file.content, /unchanged since previous read/);
-    }
+    run(READ_SCRIPT, fullPayload, env);
+    assert.ok(parseOutput(run(READ_SCRIPT, fullPayload, env)), 'full reread should dedup');
+    const bounded = run(READ_SCRIPT, boundedPayload, env);
+    assert.equal(parseOutput(bounded), undefined, 'bounded reads bypass the stub and preserve original content');
   });
 });
 
@@ -141,9 +135,7 @@ test('Read: plain-string tool_response is mirrored as a string', () => {
       tool_response: content,
     };
     const result = run(READ_SCRIPT, payload, { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10' });
-    const out = parseOutput(result);
-    assert.ok(out);
-    assert.equal(typeof out.hookSpecificOutput.updatedToolOutput, 'string');
+    assert.equal(parseOutput(result), undefined, 'first reads pass through regardless of response shape');
   });
 });
 
@@ -157,9 +149,7 @@ test('Read: {content} fallback shape is recognized', () => {
       tool_response: { content, extra: 'keep-me' },
     };
     const result = run(READ_SCRIPT, payload, { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10' });
-    const out = parseOutput(result);
-    assert.ok(out);
-    assert.equal(out.hookSpecificOutput.updatedToolOutput.extra, 'keep-me');
+    assert.equal(parseOutput(result), undefined, 'first reads preserve fallback shapes unchanged');
   });
 });
 
@@ -174,11 +164,7 @@ test('Read: text-block-array shape only rewrites the text block, leaves siblings
       tool_response: [imageBlock, { type: 'text', text: content }],
     };
     const result = run(READ_SCRIPT, payload, { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10' });
-    const out = parseOutput(result);
-    assert.ok(out);
-    const updated = out.hookSpecificOutput.updatedToolOutput;
-    assert.deepEqual(updated[0], imageBlock);
-    assert.notEqual(updated[1].text, content);
+    assert.equal(parseOutput(result), undefined, 'first reads preserve text blocks and image siblings unchanged');
   });
 });
 
@@ -247,11 +233,9 @@ test('Read: Codex runtime emits valid compressed additional context', () => {
         },
       },
     };
-    const result = run(READ_SCRIPT, payload, {
-      XDG_CACHE_HOME: cacheDir,
-      TOKENSLIM_MIN_CHARS: '10',
-      TOKENSLIM_HOOK_RUNTIME: 'codex',
-    });
+    const env = { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10', TOKENSLIM_HOOK_RUNTIME: 'codex' };
+    run(READ_SCRIPT, payload, env);
+    const result = run(READ_SCRIPT, payload, env);
     assert.equal(result.status, 0);
     const out = parseOutput(result);
     assert.equal(out.continue, false);
@@ -316,9 +300,27 @@ test('Grep: confirmed content-mode shape dedups exact lines and collapses repeat
     // exact duplicate collapsed to one occurrence
     const dupCount = lines.filter((l) => l === 'src/other-file.ts:1:  import { thing } from "./thing";').length;
     assert.equal(dupCount, 1);
-    // 8 big-file.ts matches -> first 3 kept + one summary line for the remaining 5
-    assert.ok(lines.some((l) => l === '... [tokenslim: 5 more matches in src/big-file.ts]'));
+    assert.ok(lines.includes('... [tokenslim: 1 duplicate match lines omitted]'));
+    // 8 big-file.ts matches -> first 3 kept + every omitted location listed.
+    assert.ok(lines.some((l) => l === '... [tokenslim: 5 more at src/big-file.ts:4, src/big-file.ts:5, src/big-file.ts:6, src/big-file.ts:7, src/big-file.ts:8]'));
     assert.equal(updated.numLines, lines.length);
+  });
+});
+
+test('Grep: context separators and every omitted match location are preserved', () => {
+  withTempCache((cacheDir) => {
+    const verbose = ' this is deliberately verbose match content repeated for compression';
+    const content = [
+      `src/a.ts:1:${verbose}`, `src/a.ts:2:${verbose}`, `src/a.ts:3:${verbose}`, `src/a.ts:4:${verbose}`,
+      `src/a.ts:5:${verbose}`, `src/a.ts:6:${verbose}`, `src/a.ts:7:${verbose}`, `src/a.ts:8:${verbose}`, '--',
+      'src/b.ts:1: one', '--', 'src/b.ts:2: two',
+    ].join('\n');
+    const payload = { session_id: 'sess-grep-context', tool_name: 'Grep', tool_input: {}, tool_response: { mode: 'content', content } };
+    const out = parseOutput(run(GREP_SCRIPT, payload, { XDG_CACHE_HOME: cacheDir, TOKENSLIM_MIN_CHARS: '10' }));
+    assert.ok(out);
+    const lines = out.hookSpecificOutput.updatedToolOutput.content.split('\n');
+    assert.equal(lines.filter((line) => line === '--').length, 2);
+    assert.ok(lines.includes('... [tokenslim: 5 more at src/a.ts:4, src/a.ts:5, src/a.ts:6, src/a.ts:7, src/a.ts:8]'));
   });
 });
 
@@ -400,7 +402,7 @@ test('Grep: Codex runtime emits valid compressed additional context', () => {
     assert.equal(out.additionalContext, undefined);
     assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
     assert.match(out.hookSpecificOutput.additionalContext, /^\[tokenslim: compressed Grep output\]/);
-    assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 5 more matches in src\/big-file.ts\]/);
+    assert.match(out.hookSpecificOutput.additionalContext, /\[tokenslim: 5 more at src\/big-file.ts:4, src\/big-file.ts:5/);
   });
 });
 
@@ -458,6 +460,26 @@ test('Glob: >100 paths grouped by directory, metadata preserved verbatim', () =>
     assert.ok(updated.filenames.length < filenames.length);
     assert.ok(updated.filenames.every((s) => typeof s === 'string'));
     assert.ok(updated.filenames.some((s) => s.startsWith('src/a/')));
+    // Every directory has 50 entries, so none of its basenames may be elided.
+    for (const filename of filenames) assert.ok(updated.filenames.some((group) => group.includes(filename.split('/').pop())));
+  });
+});
+
+test('Glob: per-directory cap retains its first 50 basenames and reports the exact remainder', () => {
+  withTempCache((cacheDir) => {
+    const filenames = Array.from({ length: 120 }, (_, i) => `src/many/file${i}.ts`);
+    const payload = {
+      session_id: 'sess-glob-cap',
+      tool_name: 'Glob',
+      tool_input: {},
+      tool_response: { filenames, durationMs: 1, numFiles: 120, truncated: false, totalMatches: 120, countIsComplete: true },
+    };
+    const out = parseOutput(run(GREP_SCRIPT, payload, { XDG_CACHE_HOME: cacheDir }));
+    assert.ok(out, 'expected grouped output for a directory above the cap');
+    const [group] = out.hookSpecificOutput.updatedToolOutput.filenames;
+    for (let i = 0; i < 50; i++) assert.match(group, new RegExp(`\\bfile${i}\\.ts\\b`));
+    assert.doesNotMatch(group, /\bfile50\.ts\b/);
+    assert.match(group, /\.\.\. \[tokenslim: 70 more\]\)$/);
   });
 });
 
