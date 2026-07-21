@@ -18,9 +18,15 @@ test('tees lossy output at a stable path and inserts that path into a marker', (
   assert.equal(path, teePath('session', 'tool', env));
   assert.equal(readFileSync(path, 'utf8'), 'raw output');
   assert.equal(statSync(path).mode & 0o777, 0o600);
-  assert.equal(appendTeePath('[tokenslim: 9 lines omitted]', path), `[tokenslim: 9 lines omitted full: ${path}]`);
+  assert.equal(appendTeePath('[tokenslim: 9 lines omitted]', path), `[tokenslim: 9 lines omitted]\n[tokenslim: full: ${path}]`);
   assert.equal(appendTeePath('[tokenslim: 9 lines omitted]', path), appendTeePath('[tokenslim: 9 lines omitted]', path));
 }));
+
+test('tee attachment never rewrites a marker supplied by tool output', () => {
+  const path = '/tmp/tokenslim-full.log';
+  const output = appendTeePath('grep result: [tokenslim: not ours]', path);
+  assert.equal(output, 'grep result: [tokenslim: not ours]\n[tokenslim: full: /tmp/tokenslim-full.log]');
+});
 
 test('tee ids cannot traverse out of the recovery directory', () => withCache((cache) => {
   const env = { XDG_CACHE_HOME: cache, TOKENSLIM_TEE_MIN: '1' };

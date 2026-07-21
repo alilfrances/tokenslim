@@ -69,6 +69,17 @@ test('Read guard stays silent below threshold and when offset or limit is presen
   });
 });
 
+test('Read guard caps large-file counting and reports a lower bound', () => {
+  withTemp((dir) => {
+    const filePath = join(dir, 'huge.txt');
+    // More than the guard's 5MB inspection cap; this exercises streaming rather
+    // than loading the whole artifact into the hook process.
+    writeFileSync(filePath, 'x\n'.repeat(2_700_000), 'utf8');
+    const out = JSON.parse(run(payload(filePath), { TOKENSLIM_READ_GUARD_LINES: '9999999' }).stdout);
+    assert.match(out.hookSpecificOutput.additionalContext, /is >\d+ lines/);
+  });
+});
+
 test('Read guard fails open for malformed stdin, missing files, and disable flag', () => {
   withTemp((dir) => {
     const filePath = join(dir, 'large.txt');

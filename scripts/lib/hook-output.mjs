@@ -13,23 +13,18 @@ export function detectRuntime(payload, env = process.env) {
   const override = String(env.TOKENSLIM_HOOK_RUNTIME || '').trim().toLowerCase();
   if (override === 'codex' || override === 'claude') return override;
 
-  // Codex sets Claude-compat env vars (CLAUDE_PLUGIN_ROOT etc.) for installed
-  // plugin hooks, so payload shape must outrank env. Codex payloads carry
-  // turn_id and model+tool_use_id; Claude payloads carry neither.
-  if (
-    isObject(payload) &&
-    (
-      'turn_id' in payload ||
-      ('model' in payload && 'cwd' in payload && 'tool_use_id' in payload)
-    )
-  ) {
-    return 'codex';
-  }
+  // Codex may set Claude-compat environment variables for installed hooks, so
+  // its payload-specific turn_id marker takes precedence over the environment.
+  if (isObject(payload) && 'turn_id' in payload) return 'codex';
 
+  // Without a Codex payload marker, only Codex-specific environment variables
+  // identify Codex. A Claude root wins when both runtimes' variables are present.
   if (env.CLAUDE_PLUGIN_ROOT) return 'claude';
   if (env.PLUGIN_DATA || env.CODEX_PLUGIN_ROOT) return 'codex';
-  if (env.PLUGIN_ROOT && !isObject(payload)) return 'codex';
-  if (isObject(payload) && 'permission_mode' in payload) return 'codex';
+
+  // Claude fields such as permission_mode, model, cwd, and tool_use_id are not
+  // runtime markers. Default to Claude because its no-op shape is safer in Codex
+  // than a Codex continue:false response is in Claude.
   return 'claude';
 }
 

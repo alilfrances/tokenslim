@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { compressBashOutput, stripAnsi } from './lib/pipeline.mjs';
-import { compressCommandOutput } from './lib/cmd-compressors/index.mjs';
+import { compressBashOutput, stripAnsi, stripProgressNoise } from './lib/pipeline.mjs';
+import { commandMeta, compressCommandOutput } from './lib/cmd-compressors/index.mjs';
+import { FAILURE_RE } from './lib/cmd-compressors/shared.mjs';
 import { loadConfig } from './lib/config.mjs';
 import { appendTeePath, teeOriginalOutput } from './lib/tee.mjs';
 import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
@@ -20,13 +21,39 @@ function disabled(config) {
   return normalized.includes('all') || normalized.includes('bash');
 }
 
-function failureOutput(stdout, stderr, command) {
-  if (stderr.trim()) return true;
-  // Linter diagnostics are intentionally summarized by their dedicated compressor;
-  // for all other commands error-like output is preserved byte-for-byte.
-  const binary = String(command || '').trim().split(/\s+/, 1)[0];
-  if (['eslint', 'tsc', 'ruff'].includes(binary)) return false;
-  return /\b(?:FAIL(?:ED|URE)?|ERROR|Error:|AssertionError|Exception|panic(?:ked)?|fatal:)\b/i.test(stdout);
+function observedExitFailure(response) {
+  const value = response?.exitCode ?? response?.exit_code;
+  if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+  if (typeof value === 'string' && /^-?\d+$/.test(value)) return Number(value) !== 0;
+  return null;
+}
+
+export function failureOutput(stdout, stderr, command, response) {
+  // An observed exit code is authoritative. Most Claude Bash payloads do not contain
+  // one, so fall back to structured records rather than treating routine stderr as a
+  // failure channel.
+  const exitFailure = observedExitFailure(response);
+  if (exitFailure !== null) return exitFailure;
+  if (FAILURE_RE.test(stripAnsi(stderr))) return true;
+  // Linter diagnostics have a purpose-built, location-preserving compressor. Their
+  // stdout diagnostics are the one intentional exception; a failure on stderr still
+  // passes through above. commandMeta also handles env/path/launcher forms here.
+  const binary = commandMeta(command)?.binary;
+  return !['eslint', 'tsc', 'ruff'].includes(binary) && FAILURE_RE.test(stripAnsi(stdout));
+}
+
+function compressStderr(text) {
+  const input = String(text ?? '');
+  const withoutAnsi = stripAnsi(input);
+  const output = stripProgressNoise(withoutAnsi, { buildProgress: true });
+  const rulesApplied = [];
+  if (withoutAnsi !== input) rulesApplied.push('stripAnsi');
+  if (output !== withoutAnsi) rulesApplied.push('stripProgressNoise');
+  return { text: output, stats: {
+    bytesIn: Buffer.byteLength(input, 'utf8'),
+    bytesOut: Buffer.byteLength(output, 'utf8'),
+    rulesApplied,
+  } };
 }
 
 function compressed(text, command, config, extra) {
@@ -49,8 +76,9 @@ function isLossy(original, result) {
 
 function markCompression(text, rulesApplied) {
   const output = String(text ?? '');
-  if (output.includes('[tokenslim:')) return output;
   const rules = [...new Set(rulesApplied || [])].join(', ') || 'compressed';
+  // Output can legitimately contain tokenslim examples or a prior tee log. Always
+  // add our marker as a fresh final line instead of trusting an arbitrary substring.
   return `${output}${output ? '\n' : ''}[tokenslim: ${rules}]`;
 }
 
@@ -86,6 +114,11 @@ async function main() {
     const stringResponse = typeof response === 'string';
     const stdout = stringResponse ? response : String(response?.stdout ?? '');
     const stderr = stringResponse ? '' : String(response?.stderr ?? '');
+    if (!stringResponse && response?.isImage === true) {
+      recordLedgerBestEffort(payload?.session_id, event, 'skippedImage');
+      passThrough(payload);
+      return;
+    }
     const threshold = Number.isFinite(config.minChars) ? config.minChars : 500;
     if (stdout.length + stderr.length < threshold) {
       recordLedgerBestEffort(payload?.session_id, event, 'skippedBelowThreshold');
@@ -95,14 +128,17 @@ async function main() {
 
     // A non-zero command's diagnostic output is more valuable than savings. Do not
     // risk changing it; successful commands still receive command-aware compression.
-    if (failureOutput(stdout, stderr, payload?.tool_input?.command)) {
+    const command = payload?.tool_input?.command;
+    const failed = failureOutput(stdout, stderr, command, response);
+    if (failed) {
       recordLedgerBestEffort(payload?.session_id, event, 'skippedFailure');
       passThrough(payload);
       return;
     }
-    const command = payload?.tool_input?.command;
     const compressedStdout = compressed(stdout, command, config, { stderr });
-    const compressedStderr = compressed(stderr, command, config, { stderr });
+    // stderr often carries healthy build/network progress. Never run a specialized
+    // or generic lossy compressor over it: remove ANSI/progress noise only.
+    const compressedStderr = compressStderr(stderr);
     const markedStdout = compressedStdout.text !== stdout
       ? markCompression(compressedStdout.text, compressedStdout.stats.rulesApplied)
       : compressedStdout.text;
@@ -124,7 +160,7 @@ async function main() {
       config,
       env: process.env,
       lossy: isLossy(stdout, compressedStdout) || isLossy(stderr, compressedStderr),
-      failed: Boolean(stderr.trim() || response?.exitCode || response?.exit_code),
+      failed,
     });
     const recoveredStdout = appendTeePath(markedStdout, recoveryPath);
     const recoveredStderr = recoveryPath && !markedStdout

@@ -110,6 +110,19 @@ test('Write seeds cache without prior Read', () => {
   });
 });
 
+test('Edit uses layered readDefaultLines config', () => {
+  withTemp((dir) => {
+    const cacheDir = join(dir, 'cache');
+    const filePath = join(dir, 'subject.txt');
+    writeFileSync(filePath, 'a\nb\nc\n', 'utf8');
+    writeFileSync(join(dir, '.tokenslim.json'), JSON.stringify({ readDefaultLines: 1 }), 'utf8');
+    const event = { ...editPayload('sess-config-limit', 'Write', filePath), cwd: dir };
+    run(EDIT_SCRIPT, event, { XDG_CACHE_HOME: cacheDir, XDG_CONFIG_HOME: join(dir, 'none') });
+    const state = JSON.parse(readFileSync(join(cacheDir, 'tokenslim', 'sess-config-limit.json'), 'utf8'));
+    assert.equal(state.reads[filePath], undefined);
+  });
+});
+
 test('Edit skips oversized files and malformed stdin fails open', () => {
   withTemp((dir) => {
     const cacheDir = join(dir, 'cache');

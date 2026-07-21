@@ -10,6 +10,21 @@ then uses the documented Codex `continue: false` PostToolUse path to suppress th
 original tool result with short stop text and send compact output via
 `hookSpecificOutput.additionalContext`.
 
+## Runtime detection verification matrix
+
+`TOKENSLIM_HOOK_RUNTIME=claude|codex` always overrides automatic detection. Without
+an override, a payload `turn_id` selects Codex even when Codex supplies
+`CLAUDE_PLUGIN_ROOT` for compatibility. Otherwise, `CODEX_PLUGIN_ROOT` or
+`PLUGIN_DATA` selects Codex only when `CLAUDE_PLUGIN_ROOT` is absent. All other
+cases default to Claude.
+
+| Runtime / version | Payload keys observed | Environment observed | Expected detection | Verification |
+| --- | --- | --- | --- | --- |
+| Claude Code 2.1.215 | `permission_mode`, `tool_use_id`, and possibly `model` / `cwd`; no `turn_id` | `CLAUDE_PLUGIN_ROOT` may be absent for manual hooks | Claude | Confirmed by payload capture; these Claude fields must not select Codex. |
+| Codex CLI (version to record during next smoke) | `turn_id` | May also set `CLAUDE_PLUGIN_ROOT` compatibility variables | Codex | Payload marker takes precedence; live smoke pending version capture. |
+| Codex environment fallback | No `turn_id` available | `CODEX_PLUGIN_ROOT` or `PLUGIN_DATA`, without `CLAUDE_PLUGIN_ROOT` | Codex | Covered by detection-matrix tests; live smoke pending. |
+| Unknown / incomplete payload | No `turn_id` | No Codex-positive environment variable | Claude | Safe default; prevents a Claude turn from receiving Codex `continue: false`. |
+
 ## PreToolUse Bash rewrite
 
 Claude Code live smoke (v0.3.0, Claude Code 2.1.215) accepted this response shape and

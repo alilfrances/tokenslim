@@ -28,40 +28,6 @@ function passThrough(payload) {
   if (output) process.stdout.write(JSON.stringify(output));
 }
 
-function isBlankLine(line) {
-  const m = line.match(/^(\s*\d+\t)(.*)$/s);
-  const content = m ? m[2] : line;
-  return content.trim() === '';
-}
-
-function stripTrailingWhitespace(line) {
-  const m = line.match(/^(\s*\d+\t)(.*)$/s);
-  if (m) return m[1] + m[2].replace(/[ \t]+$/, '');
-  return line.replace(/[ \t]+$/, '');
-}
-
-function slimText(text) {
-  const lines = text.split('\n').map(stripTrailingWhitespace);
-  const out = [];
-  let blankBuffer = [];
-  const flush = () => {
-    if (blankBuffer.length === 0) return;
-    if (blankBuffer.length >= 3) out.push(blankBuffer[0]);
-    else out.push(...blankBuffer);
-    blankBuffer = [];
-  };
-  for (const line of lines) {
-    if (isBlankLine(line)) {
-      blankBuffer.push(line);
-    } else {
-      flush();
-      out.push(line);
-    }
-  }
-  flush();
-  return out.join('\n');
-}
-
 function main(input) {
   let payload;
   try {
@@ -113,35 +79,21 @@ function main(input) {
     if (existing && existing.hash === hash) {
       const fromEdit = existing.source === 'Edit' || existing.source === 'Write';
       const stub = fromEdit
-        ? `[tokenslim] ${filePath} unchanged since your last Edit/Write in this session (${existing.headerLine} lines, sha256:${hash.slice(0, 12)}) — content reconstructible from context above.`
-        : `[tokenslim] ${filePath} unchanged since previous read in this session (${existing.headerLine} lines, sha256:${hash.slice(0, 12)}). Content already in context above.`;
+        ? `[tokenslim] ${filePath} unchanged since your last Edit/Write in this session (${existing.headerLine} lines, sha256:${hash.slice(0, 12)}) — content reconstructible from context above. If the content is no longer in context, re-read with offset/limit (bounded reads bypass this stub).`
+        : `[tokenslim] ${filePath} unchanged since previous read in this session (${existing.headerLine} lines, sha256:${hash.slice(0, 12)}). Content already in context above. If the content is no longer in context, re-read with offset/limit (bounded reads bypass this stub).`;
       const updatedToolOutput = locator.set(stub);
       recordDiagnostic(state, { tool: 'Read', event, outcome: 'deduped' });
-      recordSavings(state, { tool: fromEdit ? 'Edit' : 'Read', bytesIn: text.length, bytesOut: stub.length, command: toolInput?.file_path || 'Read', cwd: payload?.cwd });
+      recordSavings(state, { tool: fromEdit ? 'Edit' : 'Read', bytesIn: Buffer.byteLength(text), bytesOut: Buffer.byteLength(stub), command: toolInput?.file_path || 'Read', cwd: payload?.cwd });
       saveState(sessionId, state);
       process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
       return;
     }
   }
 
-  const slimmed = slimText(text);
-  if (dedupEligible) {
-    cache.set(filePath, { hash, headerLine: lineCount, source: 'Read' });
-    saveState(sessionId, state);
-  }
-
-  const saved = text.length - slimmed.length;
-  const ratio = text.length > 0 ? saved / text.length : 0;
-  if (ratio >= 0.1) {
-    const updatedToolOutput = locator.set(slimmed);
-    recordDiagnostic(state, { tool: 'Read', event, outcome: 'compressed' });
-    recordSavings(state, { tool: 'Read', bytesIn: text.length, bytesOut: slimmed.length, command: toolInput?.file_path || 'Read', cwd: payload?.cwd });
-    saveState(sessionId, state);
-    process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
-    return;
-  }
-
-  recordDiagnostic(state, { tool: 'Read', event, outcome: 'skippedPoorRatio' });
+  // A first read must be byte-identical to disk: Edit old_string matching depends on it.
+  // Savings come only from later unchanged full-file reads.
+  if (dedupEligible) cache.set(filePath, { hash, headerLine: lineCount, source: 'Read' });
+  recordDiagnostic(state, { tool: 'Read', event, outcome: 'skippedFirstRead' });
   saveState(sessionId, state);
   passThrough(payload);
 }
