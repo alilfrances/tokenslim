@@ -8,6 +8,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   minChars: 500,
   disable: [],
   readGuardLines: 2000,
+  readDefaultLines: 2000,
   tee: { enabled: true, mode: 'lossy', maxFiles: 20 },
   rewrite: { enabled: true, exclude: [], dockerBuild: false },
   filters: [],
@@ -47,6 +48,7 @@ function validLayer(value) {
   if (Number.isFinite(value.minChars) && value.minChars >= 0) layer.minChars = value.minChars;
   if (Array.isArray(value.disable) && value.disable.every((item) => typeof item === 'string')) layer.disable = value.disable;
   if (Number.isFinite(value.readGuardLines) && value.readGuardLines >= 0) layer.readGuardLines = value.readGuardLines;
+  if (Number.isFinite(value.readDefaultLines) && value.readDefaultLines >= 0) layer.readDefaultLines = value.readDefaultLines;
   if (plainObject(value.tee)) {
     const tee = {};
     if (typeof value.tee.enabled === 'boolean') tee.enabled = value.tee.enabled;
@@ -95,8 +97,10 @@ function envLayer(env) {
   };
   const minChars = number('TOKENSLIM_MIN_CHARS');
   const readGuardLines = number('TOKENSLIM_READ_GUARD_LINES');
+  const readDefaultLines = number('TOKENSLIM_READ_DEFAULT_LINES');
   if (minChars !== undefined) layer.minChars = minChars;
   if (readGuardLines !== undefined) layer.readGuardLines = readGuardLines;
+  if (readDefaultLines !== undefined) layer.readDefaultLines = readDefaultLines;
   if (typeof env.TOKENSLIM_DISABLE === 'string') {
     layer.disable = env.TOKENSLIM_DISABLE.split(',').map((part) => part.trim()).filter(Boolean);
   }
@@ -119,7 +123,7 @@ export function loadConfig(cwd = process.cwd(), env = process.env) {
   const configHome = env.XDG_CONFIG_HOME || join(home, '.config');
   const projectPath = join(resolve(cwd), '.tokenslim.json');
   const globalPath = join(configHome, 'tokenslim', 'config.json');
-  const key = JSON.stringify([projectPath, globalPath, env.TOKENSLIM_MIN_CHARS, env.TOKENSLIM_READ_GUARD_LINES, env.TOKENSLIM_DISABLE, env.TOKENSLIM_REWRITE_ENABLED, env.TOKENSLIM_REWRITE_EXCLUDE, env.TOKENSLIM_REWRITE_DOCKER_BUILD]);
+  const key = JSON.stringify([projectPath, globalPath, env.TOKENSLIM_MIN_CHARS, env.TOKENSLIM_READ_GUARD_LINES, env.TOKENSLIM_READ_DEFAULT_LINES, env.TOKENSLIM_DISABLE, env.TOKENSLIM_REWRITE_ENABLED, env.TOKENSLIM_REWRITE_EXCLUDE, env.TOKENSLIM_REWRITE_DOCKER_BUILD]);
   if (cache.has(key)) return clone(cache.get(key));
   let config = clone(DEFAULT_CONFIG);
   config = merge(config, readLayer(globalPath));

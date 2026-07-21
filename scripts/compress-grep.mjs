@@ -93,12 +93,21 @@ function locateText(toolResponse) {
 function dedupExactLines(lines) {
   const seen = new Set();
   const out = [];
+  let omitted = 0;
   for (const line of lines) {
-    if (seen.has(line)) continue;
+    // Context separators delimit independent result blocks and must never be merged.
+    if (line === '--') {
+      out.push(line);
+      continue;
+    }
+    if (seen.has(line)) {
+      omitted += 1;
+      continue;
+    }
     seen.add(line);
     out.push(line);
   }
-  return out;
+  return { lines: out, omitted };
 }
 
 // ripgrep-style "path:line:content" prefix; falls back to no-file (null) for lines
@@ -108,8 +117,8 @@ function extractFile(line) {
   return m ? m[1] : null;
 }
 
-// Collapse runs of 4+ consecutive lines from the same file down to the first 3 plus
-// a one-line summary of how many more were omitted.
+// Collapse runs of 4+ consecutive lines from the same file down to the first 3, but
+// preserve every omitted location so call sites remain enumerable.
 function collapseRepeatedMatches(lines) {
   const out = [];
   let i = 0;
@@ -125,7 +134,8 @@ function collapseRepeatedMatches(lines) {
     const group = lines.slice(i, j);
     if (group.length > 3) {
       out.push(...group.slice(0, 3));
-      out.push(`... [tokenslim: ${group.length - 3} more matches in ${file}]`);
+      const locations = group.slice(3).map((line) => line.match(/^(.+?:\d+):/)?.[1]).filter(Boolean);
+      out.push(`... [tokenslim: ${group.length - 3} more at ${locations.join(', ')}]`);
     } else {
       out.push(...group);
     }
@@ -135,12 +145,16 @@ function collapseRepeatedMatches(lines) {
 }
 
 function compressGrepText(text) {
-  const lines = text.split('\n');
-  return collapseRepeatedMatches(dedupExactLines(lines)).join('\n');
+  const deduped = dedupExactLines(text.split('\n'));
+  const output = collapseRepeatedMatches(deduped.lines);
+  if (deduped.omitted > 0) output.push(`... [tokenslim: ${deduped.omitted} duplicate match lines omitted]`);
+  return output.join('\n');
 }
 
 // Groups a >100-entry Glob filenames array into per-directory summary strings.
 // Each summary is itself a plain string, so the array shape stays valid.
+const GLOB_NAMES_PER_DIRECTORY_CAP = 50;
+
 function groupFilenames(filenames) {
   const byDir = new Map();
   const order = [];
@@ -154,8 +168,9 @@ function groupFilenames(filenames) {
   }
   return order.map((dir) => {
     const files = byDir.get(dir);
-    const shown = files.slice(0, 5).join(', ');
-    const suffix = files.length > 5 ? ', ...' : '';
+    const shown = files.slice(0, GLOB_NAMES_PER_DIRECTORY_CAP).join(', ');
+    const omitted = files.length - GLOB_NAMES_PER_DIRECTORY_CAP;
+    const suffix = omitted > 0 ? `, ... [tokenslim: ${omitted} more]` : '';
     return `${dir}/ (${files.length} files: ${shown}${suffix})`;
   });
 }

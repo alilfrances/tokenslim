@@ -12,10 +12,13 @@ const cases = [
   ['cargo test', 'cargo test --quiet'],
   ['pytest tests', 'pytest tests -q'],
   ['git status', 'git status --porcelain=v1 -b'],
-  ['mvn test', 'mvn test -q'],
   ['gradle test', 'gradle test -q'],
 ];
 for (const [input, output] of cases) test(`rewrites ${input}`, () => assert.equal(rewriteCommand(input, config)?.command, output));
+
+test('Maven is not quieted because its test summary is actionable', () => {
+  assert.equal(rewriteCommand('mvn test', config), null);
+});
 
 test('docker build is opt-in', () => {
   assert.equal(rewriteCommand('docker build .', config), null);
