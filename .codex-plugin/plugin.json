@@ -1,6 +1,6 @@
 {
   "name": "tokenslim",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Input-token compressor for Claude Code and Codex. Compresses Bash, Read, Grep, Glob, and MCP tool results before they enter model context, keeps the Read dedup cache warm across Edit/Write, rewrites eligible Bash commands with quiet flags before execution, and warns before large unbounded reads.",
   "author": {
     "name": "Alil Kuizon"
