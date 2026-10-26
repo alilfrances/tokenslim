@@ -37,6 +37,8 @@ function add(bucket, item) {
   bucket.events = number(bucket.events) + number(item.events || 1);
 }
 const RECOVERY_OUTCOMES = ['capped', 'teeRead', 'teeCat', 'rerun'];
+// Bash dump guard counters (additive; days without them load as before). le800/le2000/gt2000 are size buckets of shadow hits.
+export const BASH_GUARD_KEYS = Object.freeze(['wouldDeny', 'wouldDenyBytes', 'le800', 'le2000', 'gt2000', 'denied', 'repeated', 'skippedRuntime']);
 function dayKey(date) { return date.toISOString().slice(0, 10); }
 function prune(history, today) {
   const cutoff = new Date(today);
@@ -67,6 +69,11 @@ export function updateHistory(events, now = new Date()) {
           const counters = record.recovery ||= {};
           counters[event.outcome] = number(counters[event.outcome]) + 1;
         }
+        continue;
+      }
+      if (event?.kind === 'bashGuard') {
+        const counters = record.bashGuard ||= {};
+        for (const key of BASH_GUARD_KEYS) if (number(event[key]) > 0) counters[key] = number(counters[key]) + number(event[key]);
         continue;
       }
       const item = { bytesIn: number(event.bytesIn), bytesOut: number(event.bytesOut), events: number(event.events) || 1 };

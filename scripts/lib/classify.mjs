@@ -63,12 +63,14 @@ function dumpFromTokens(tokens) {
   const binary = binaryOf(tokens[0]);
   const args = tokens.slice(1);
   let file = null;
+  let limit = null;
   if (binary === 'cat') file = singleOperand(args, { flag: (a) => /^-[A-Za-z]+$/.test(a) });
   else if (binary === 'nl') file = singleOperand(args, { flag: (a) => /^-[A-Za-z]/.test(a), valueFlags: NL_VALUE_FLAGS });
   else if (binary === 'sed') file = sedDump(args);
-  else if (binary === 'head') file = headDump(args);
+  else if (binary === 'head') ({ file = null, lines: limit = null } = headDump(args) || {});
   else if (binary === 'tail') file = tailDump(args);
-  return file === null ? null : { form: binary, file };
+  // `limit` (head only) is the N of `head -n N`, so callers can size what the dump actually prints.
+  return file === null ? null : { form: binary, file, ...(limit === null ? {} : { limit }) };
 }
 
 function sedDump(args) {
@@ -93,7 +95,8 @@ function headDump(args) {
     else rest.push(arg);
   }
   if (lines === null || !(lines >= HEAD_DUMP_MIN)) return null;
-  return singleOperand(rest, { flag: () => false });
+  const file = singleOperand(rest, { flag: () => false });
+  return file === null ? null : { file, lines };
 }
 
 function tailDump(args) {
@@ -153,6 +156,7 @@ function chainSegment(tokens) {
   else {
     const single = dumpFromTokens(tokens);
     files = single ? [single.file] : null;
+    if (single && single.limit !== undefined) return { type: 'dump', form: binary, files, limit: single.limit };
   }
   return files?.length ? { type: 'dump', form: binary, files } : null;
 }

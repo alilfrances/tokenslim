@@ -148,7 +148,8 @@ this checkout).
 
 Five `PostToolUse` matchers cover Bash, Read, Edit|Write, `mcp__.*`, and Grep|Glob,
 replacing tool results with compressed versions before the model ever sees them. Two
-`PreToolUse` matchers add an opt-in Bash quiet-flag rewrite and a Read guard. Claude
+`PreToolUse` matchers add the Bash hook (a whole-file-dump guard that only observes by default,
+plus the opt-in quiet-flag rewrite) and a Read guard. Claude
 Code receives structured `updatedToolOutput`; Codex receives a short `continue: false`
 stop message while the compressed output is added through
 `hookSpecificOutput.additionalContext`:
@@ -260,11 +261,12 @@ exactly per file) and two go/no-go lines against an 8% share of Bash characters,
 
 | Var | Default | Effect |
 |---|---|---|
-| `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, `rewrite`, `tee`, or `all` |
+| `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, `bashguard`, `rewrite`, `tee`, or `all` |
 | `TOKENSLIM_MIN_CHARS` | `500` | Outputs smaller than this pass through untouched |
 | `TOKENSLIM_MCP_ARRAYS` | off | Set to `1` to collapse >50-item homogeneous arrays in MCP JSON results |
 | `TOKENSLIM_READ_GUARD_MODE` | `advise` | `advise` (one-line hint), `deny` (hold back huge reads, opt-in), or `off` |
 | `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard line threshold (alias for `readGuard.lines`) |
+| `TOKENSLIM_BASH_GUARD_MODE` | `shadow` | Bash dump guard: `shadow` (record only), `deny` (outline-first, opt-in) or `off`; see Bash dump guard |
 | `TOKENSLIM_READ_DEFAULT_LINES` | `2000` | Files longer than this are never cache-warmed after Edit/Write (Read would truncate) |
 | `TOKENSLIM_BASH_CAP_CHARS` | `0` (off) | Mid-band Bash output cap in chars (0 or at least 2000); see Configuration files |
 | `TOKENSLIM_TEE_MIN` | `4096` | Minimum original-output bytes before a lossy Bash/MCP result is saved for recovery |
@@ -287,6 +289,7 @@ optional; this is the complete set with its defaults:
   "disable": [],
   "readGuard": { "mode": "advise", "lines": 2000, "bytes": 0 },
   "readDefaultLines": 2000,
+  "bashGuard": { "mode": "shadow", "lines": 400, "bytes": 0 },
   "tee": { "enabled": true, "mode": "lossy", "maxFiles": 100 },
   "bash": { "capChars": 0, "capHeadLines": 60, "capTailLines": 60 },
   "rewrite": { "enabled": false, "exclude": [], "dockerBuild": false },
@@ -350,6 +353,42 @@ cut copy of them and the model only sees Claude Code's preview (see `docs/SHAPES
   Codex falls back to `advise`, because deny is unverified there. Deny only pays off when the model
   takes the outline's hint, so it stays off until you have compared it on your own work.
 - `off` (or `TOKENSLIM_DISABLE=readguard`) disables the guard.
+
+### Bash dump guard
+
+Reading a big file through Bash (`cat f`, `nl f`, `sed -n p f`, `head -n N f`, `tail -n +1 f`, or
+several files at once such as `cat a b` or `cat a; echo ---; cat b`) puts the whole file in context,
+which the Read guard cannot see. `bashGuard` handles that in the same `PreToolUse` Bash hook that
+hosts the rewrite (no extra process). `bashGuard.mode` is `shadow` (default), `deny`, or `off`
+(`TOKENSLIM_BASH_GUARD_MODE`, case-insensitive; `disable: ["bashguard"]` or `TOKENSLIM_DISABLE=bashguard`
+also turns it off).
+
+- **What counts.** The command must be a plain dump as above, with an optional leading `cd X &&`.
+  Pipes, redirects, globs, variables and any other command are never dumps. Every operand must be an
+  existing regular file of a source/config/doc text type (the Read guard's list; images, PDFs, data
+  dumps and binaries never count). It is over the threshold when the total lines across the files
+  exceed `bashGuard.lines` (default 400; `head -n N` counts `min(N, lines)`), or, when
+  `bashGuard.bytes` is above 0, the total bytes exceed it. Only reads of up to 5 MB per file are done.
+- **`shadow` (default).** Never prints anything and never changes a command. It only counts what
+  `deny` would have withheld: how many dumps (`wouldDeny`), the sum of their file bytes, and a size
+  bucket by total lines (up to 800, 801-2000, over 2000), in the session ledger and the daily history.
+  Counts and byte sums only: never the command, a path or a file name. `/tokenslim:tokenstats` shows
+  it as `bash dump guard (shadow): N whole-file dump(s) would be outlined, X KB of files; ≈Y% of
+  attempted Bash bytes`. Nothing is recorded for commands that are not dumps.
+- **`deny` (opt-in).** The first over-threshold dump is refused with the file's size, a regex outline
+  (`L<start>-L<end>  <signature>`, at most 40 entries in all; multi-file dumps get one section per
+  file, headed by its basename) and the instruction to read the range you need with `offset`/`limit`
+  or `sed -n 'a,bp'`. **Repeating the identical command is allowed** (once per denial, per session
+  and working directory), so a dump is delayed by one call, never blocked. To switch on:
+  `{"bashGuard":{"mode":"deny"}}` or `TOKENSLIM_BASH_GUARD_MODE=deny`. Try it after watching the
+  shadow numbers, since it only pays off when the model takes the outline's hint.
+- **Repeat rate.** In deny mode tokenstats prints `bash dump guard: denied N, repeated M (R%)` and
+  flags `⚠` above 30%: the model re-ran the dump anyway, so the outline was often not enough and a
+  higher `bashGuard.lines` (or staying in shadow) is the better setting.
+- **Codex.** Deny is Claude Code only. On Codex, or when the payload has no `session_id`, deny mode
+  behaves like shadow (silent, no denial) and counts the dump as `skippedRuntime` instead.
+- **Rewrites.** The guard runs first. In `deny` a refused dump ends the hook; in `shadow` and `off`
+  the opt-in rewrite behaves exactly as before.
 
 ### Privacy and local storage
 
@@ -446,7 +485,7 @@ Repo layout: `scripts/lib/pipeline.mjs` (pure compression rules), `scripts/lib/s
 `scripts/compress-{bash,read,grep,edit,mcp}.mjs`, `scripts/rewrite-bash.mjs`, and
 `scripts/guard-read.mjs` (hook entrypoints), `scripts/lib/bash-hook.mjs` (Bash hook core, also
 used by the replay), `scripts/lib/cmd-compressors/` and `scripts/lib/shape-compressors/`
-(command-aware and output-shape Bash compressors), `scripts/lib/outline.mjs` (deny-mode outlines),
+(command-aware and output-shape Bash compressors), `scripts/lib/outline.mjs` (deny-mode outlines), `scripts/lib/bash-guard.mjs` (Bash dump guard),
 `scripts/budget.mjs` with `scripts/lib/budget.mjs`, `scripts/lib/transcripts.mjs` (shared transcript
 walker), `hooks/hooks.json` (wiring), `docs/` (contracts and operational notes; `docs/history/`
 holds archived plans), and `scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
