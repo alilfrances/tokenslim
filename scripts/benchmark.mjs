@@ -15,7 +15,7 @@ import { loadConfig, loadConfigLayerFile, mergeConfigLayer } from './lib/config.
 import { processBashPayload } from './lib/bash-hook.mjs';
 import { commandFamily } from './lib/privacy.mjs';
 import { scanTranscripts, transcriptFiles } from './lib/transcripts.mjs';
-import { BUCKETS, SIZE_LABELS, classifyOutput, lineCount, sizeBucket } from './lib/classify.mjs';
+import { BUCKETS, SIZE_LABELS, classifyOutput, lineCount, sizeBucket, splitMultiDump } from './lib/classify.mjs';
 import { isTextLikePath, languageFor, outlineText } from './lib/outline.mjs';
 import { BASH_DUMP_INSTRUCTION, guardDenyReason } from './lib/guard-reason.mjs';
 
@@ -363,6 +363,7 @@ export function classifyTranscripts({ root, sinceDays, lines = DEFAULT_CLASSIFY_
   const sizes = new Map(SIZE_LABELS.map((label) => [label, { lines: label, count: 0, chars: 0 }]));
   const forms = new Map();
   const over = { count: 0, chars: 0, weightedChars: 0 };
+  const multi = { count: 0, chars: 0, over: { count: 0, chars: 0, weightedChars: 0 }, inBound: 0, excluded: 0 };
   const bound = { dumps: 0, outlineChars: 0, savedChars: 0, weightedSavedChars: 0, notTextFile: 0, notTextChars: 0 };
   let images = 0; let apiCalls = 0;
   for (const { pairs, calls } of scanTranscripts(files, { sinceMs, tools: ['Bash'] })) {
@@ -385,7 +386,25 @@ export function classifyTranscripts({ root, sinceDays, lines = DEFAULT_CLASSIFY_
       size.count += 1; size.chars += chars;
       const form = bump(forms, dump.form, { form: dump.form, count: 0, chars: 0 });
       form.count += 1; form.chars += chars;
-      if (lineCount(pair.text) <= lines) continue;
+      const dumpLines = lineCount(pair.text);
+      if (dump.form === 'multi') {
+        multi.count += 1; multi.chars += chars;
+        if (dumpLines <= lines) continue;
+        multi.over.count += 1; multi.over.chars += chars; multi.over.weightedChars += chars * weight;
+        // Counted in the bound only when the output splits exactly per file (see splitMultiDump); each file chunk is
+        // then judged like a single dump: above the threshold and on an allowlisted file.
+        const pieces = splitMultiDump(dump, pair.text);
+        if (!pieces) { multi.excluded += 1; continue; }
+        multi.inBound += 1;
+        for (const piece of pieces) {
+          if (lineCount(piece.text) <= lines || !isTextLikePath(piece.file)) continue;
+          const outlineChars = outlineReasonChars(piece.text, piece);
+          const saved = Math.max(0, piece.text.length - outlineChars);
+          bound.dumps += 1; bound.outlineChars += outlineChars; bound.savedChars += saved; bound.weightedSavedChars += saved * weight;
+        }
+        continue;
+      }
+      if (dumpLines <= lines) continue;
       over.count += 1; over.chars += chars; over.weightedChars += chars * weight;
       if (!isTextLikePath(dump.file)) { bound.notTextFile += 1; bound.notTextChars += chars; continue; }
       const outlineChars = outlineReasonChars(pair.text, dump);
@@ -396,6 +415,8 @@ export function classifyTranscripts({ root, sinceDays, lines = DEFAULT_CLASSIFY_
   const total = [...rows.values()].reduce((sum, row) => ({ count: sum.count + row.count, chars: sum.chars + row.chars, weightedChars: sum.weightedChars + row.weightedChars }), { count: 0, chars: 0, weightedChars: 0 });
   const pct = (part, whole) => (whole === 0 ? 0 : (part / whole) * 100);
   const overPct = pct(over.chars, total.chars);
+  const inclChars = over.chars + multi.over.chars;
+  const inclPct = pct(inclChars, total.chars);
   return {
     transcripts: root, files: files.length, sinceDays: sinceDays ?? null, apiCalls, imagesSkipped: images,
     results: total.count, chars: total.chars, weightedChars: total.weightedChars,
@@ -405,9 +426,16 @@ export function classifyTranscripts({ root, sinceDays, lines = DEFAULT_CLASSIFY_
       byForm: [...forms.values()].sort((a, b) => a.form.localeCompare(b.form)),
       threshold: lines,
       overThreshold: { ...over, pctChars: overPct, pctWeighted: pct(over.weightedChars, total.weightedChars) },
+      multi: {
+        count: multi.count, chars: multi.chars, pctChars: pct(multi.chars, total.chars),
+        overThreshold: { ...multi.over, pctChars: pct(multi.over.chars, total.chars), pctWeighted: pct(multi.over.weightedChars, total.weightedChars) },
+        inBound: multi.inBound, excludedFromBound: multi.excluded,
+      },
+      overThresholdInclMulti: { count: over.count + multi.over.count, chars: inclChars, pctChars: inclPct, pctWeighted: pct(over.weightedChars + multi.over.weightedChars, total.weightedChars) },
       outlineUpperBound: { ...bound, pctOfBashChars: pct(bound.savedChars, total.chars), pctOfWeighted: pct(bound.weightedSavedChars, total.weightedChars) },
     },
     goNoGo: { lines, pct: overPct, thresholdPct: GO_THRESHOLD_PCT, go: overPct >= GO_THRESHOLD_PCT },
+    goNoGoInclMulti: { lines, pct: inclPct, thresholdPct: GO_THRESHOLD_PCT, go: inclPct >= GO_THRESHOLD_PCT },
   };
 }
 
@@ -429,9 +457,12 @@ export function formatClassifyText(report) {
     `fileDump by output lines: ${dump.bySize.map((s) => `${s.lines} ${n(s.count)} result(s) ${n(s.chars)} chars (${p(s.pctChars)})`).join('; ')}`,
     `fileDump by form: ${dump.byForm.map((f) => `${f.form} ${n(f.count)}`).join(', ') || 'none'}`,
     `fileDump over ${dump.threshold} lines: ${n(over.count)} result(s), ${n(over.chars)} chars = ${p(over.pctChars)} of Bash chars, ${p(over.pctWeighted)} of cost-weighted`,
+    `fileDump multi-file (several whole files in one result; not in the single-file figures): ${n(dump.multi.count)} result(s), ${n(dump.multi.chars)} chars = ${p(dump.multi.pctChars)} of Bash chars; over ${dump.threshold} lines: ${n(dump.multi.overThreshold.count)} result(s), ${n(dump.multi.overThreshold.chars)} chars = ${p(dump.multi.overThreshold.pctChars)}`,
     `outline-first savings, upper bound (assumes no follow-up read): ${n(bound.savedChars)} chars = ${p(bound.pctOfBashChars)} of all Bash chars (${p(bound.pctOfWeighted)} cost-weighted), over ${n(bound.dumps)} dump(s) whose file the read guard may withhold; deny reasons total ${n(bound.outlineChars)} chars`,
+    ...(dump.multi.overThreshold.count ? [`  multi-file dumps over ${dump.threshold} lines: ${n(dump.multi.inBound)} split exactly per file and in the bound, ${n(dump.multi.excludedFromBound)} excluded from the bound (output cannot be split per file reliably)`] : []),
     ...(bound.notTextFile ? [`  not counted: ${n(bound.notTextFile)} dump(s), ${n(bound.notTextChars)} chars, of files outside the guard's text allowlist`] : []),
     `WP4 go/no-go: fileDump over ${dump.threshold} lines = ${p(report.goNoGo.pct)} of Bash chars (threshold ${report.goNoGo.thresholdPct}%) → ${report.goNoGo.go ? 'GO' : 'NO-GO'}`,
+    `WP4 go/no-go incl. multi-file: fileDump over ${dump.threshold} lines incl. multi-file = ${p(report.goNoGoInclMulti.pct)} of Bash chars (threshold ${report.goNoGoInclMulti.thresholdPct}%) → ${report.goNoGoInclMulti.go ? 'GO' : 'NO-GO'}`,
   ].join('\n');
 }
 

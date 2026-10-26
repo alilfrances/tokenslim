@@ -249,12 +249,12 @@ with up to five example `tool_use` ids; it should always be 0. Without `--transc
 results are, so you can see where the characters (and the cost-weighted characters) actually go. Every non-image result lands in
 exactly one bucket, first match wins: `fileDump` (the command is a whole-file dump of one file: `cat F`, `nl F`,
 `sed -n '1,$p' F`, `tail -n +1 F` or `head -n N F` with N of at least 400, optionally after `cd X &&`; pipes,
-redirects, globs, heredocs and several files do not count), `grep` (grep-shaped output), `pathList` (at least 8 lines, 80% of
+redirects, globs and heredocs do not count; `cat a b` and chains such as `cat a; echo ---; cat b` are counted separately as `multi`), `grep` (grep-shaped output), `pathList` (at least 8 lines, 80% of
 them paths), `testRunner`, `json`, `other`; results Claude Code already persisted are their own bucket. File dumps are also split by
 size (up to 400, 401 to 2000, over 2000 lines), and the report prints an upper bound of what an outline-first guard could save
 (dump chars minus the size line, outline and instruction the read guard would show instead, assuming the model never
-reads the file afterwards; `--classify-lines` sets the 400-line threshold) and a go/no-go line against an 8% share of Bash
-characters. The report holds counts and sizes only, never command text or paths.
+reads the file afterwards; `--classify-lines` sets the 400-line threshold; multi-file dumps join the bound only when the output splits
+exactly per file) and two go/no-go lines against an 8% share of Bash characters, without and with multi-file dumps. The report holds counts and sizes only, never command text or paths.
 
 ## Configuration (env vars)
 
