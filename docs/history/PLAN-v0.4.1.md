@@ -145,3 +145,12 @@ The A/B uses the same model and 8–10 real tasks, graded blind; accept only if 
 
 ## 5. Order
 WP1 → WP2 → WP-R1 (release 0.4.1) → WP3 (measure; go/no-go) → WP4 → WP5 → §4 gate → WP6 → release 0.5.0.
+
+---
+
+## Status (v0.5.0)
+- **v0.4.1 shipped:** WP1, WP2 (PR #33).
+- **v0.5.0 shipped:** WP3 (`--classify`, including multi-file dumps) and WP4 (bash dump guard).
+  - The maintainer could not run the go/no-go replay on their own corpus, so WP4 ships with `bashGuard.mode: "shadow"` as the default. It never changes behavior and records what deny mode would withhold, so `/tokenslim:tokenstats` measures the opportunity on real usage. `deny` is opt-in and its repeat rate is reported.
+- **Not shipped:** WP5. Its lossless shapes measured below the 0.5% bar locally; `pathList` measured 0.7% on a biased corpus, so it was not worth its code yet.
+- **Deferred:** WP6. Default changes still need the §4 quality gate, or shadow data from real use.
