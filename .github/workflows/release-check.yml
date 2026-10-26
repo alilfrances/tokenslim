@@ -23,7 +23,8 @@ jobs:
           node-version: 22
 
       - name: Syntax check scripts
-        run: node --check scripts/*.mjs scripts/lib/*.mjs
+        # node --check takes one file; extra args become argv and are never checked.
+        run: for f in scripts/*.mjs scripts/lib/*.mjs scripts/lib/*/*.mjs; do node --check "$f" || exit 1; done
 
       - name: Validate manifest versions
         run: node scripts/validate-release-version.mjs
