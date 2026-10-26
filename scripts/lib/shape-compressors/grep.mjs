@@ -90,6 +90,48 @@ export function group(text) {
   return grouped ? output.join('\n') : null;
 }
 
+/**
+ * Per-file match counts for lines[start, end), for the output cap's "omitted matches" summary. Works on raw grep
+ * lines and on text already grouped by group(): paths are resolved over the WHOLE text, because a cut can fall
+ * inside a group and the omitted members' header sits in the kept head. Context lines are not matches and are not
+ * counted. Returns [[path, count], ...] in first-appearance order, or null when the region is not grep-shaped
+ * (same thresholds as the detector).
+ */
+export function omittedMatchCounts(lines, start, end) {
+  const raw = parseLines(lines);
+  const info = new Array(lines.length).fill(null);
+  let current = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const member = MEMBER_RE.exec(lines[i]);
+    if (raw[i]) {
+      info[i] = { path: raw[i].path, match: raw[i].sep === ':' };
+      current = null;
+    } else if (member && current) {
+      info[i] = { path: current, match: member[2] === ':' };
+    } else if (!member && MEMBER_RE.test(lines[i + 1] ?? '')) {
+      // A group header (see group()): the path for the members that follow.
+      current = lines[i];
+      info[i] = { path: current, match: false };
+    } else {
+      current = null;
+    }
+  }
+  let nonEmpty = 0;
+  let parsed = 0;
+  let matches = 0;
+  const counts = new Map();
+  for (let i = start; i < end; i += 1) {
+    if (lines[i].trim() !== '') nonEmpty += 1;
+    if (!info[i]) continue;
+    parsed += 1;
+    if (!info[i].match) continue;
+    matches += 1;
+    counts.set(info[i].path, (counts.get(info[i].path) || 0) + 1);
+  }
+  if (matches < MIN_LINES || parsed < nonEmpty * MIN_SHARE) return null;
+  return [...counts];
+}
+
 /** Inverse of group(); used by tests to prove the transform is lossless. */
 export function ungroup(text) {
   const lines = String(text ?? '').split('\n');

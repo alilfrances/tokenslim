@@ -1,3 +1,5 @@
+import { omittedMatchCounts } from './shape-compressors/grep.mjs';
+
 const DEFAULT_MAX_CHARS = 40000;
 const DEFAULT_HEAD_LINES = 150;
 const DEFAULT_TAIL_LINES = 250;
@@ -297,6 +299,22 @@ export function dedupStackTraces(text) {
   return output.join('\n').replace(/\n+$/g, '');
 }
 
+const MAX_COUNT_FILES = 40;
+
+function formatMatchCounts(counts) {
+  const shown = counts.slice(0, MAX_COUNT_FILES);
+  const lines = [`${MARKER_PREFIX} omitted matches by file]`, ...shown.map(([path, count]) => `${path}: ${count}`)];
+  const rest = counts.slice(MAX_COUNT_FILES);
+  if (rest.length) lines.push(`${MARKER_PREFIX} ${rest.length} more files, ${rest.reduce((sum, [, count]) => sum + count, 0)} matches]`);
+  return lines;
+}
+
+/**
+ * Keeps the first headLines and last tailLines lines. Options: maxChars (no-op below it), headLines, tailLines;
+ * grepCounts (the output cap): when the omitted region is grep-shaped, list omitted matches per file;
+ * maxImportant (the output cap): at most this many error-like omitted lines are re-shown, so a grep for "error"
+ * cannot reproduce the whole omitted region.
+ */
 export function headTailTruncate(text, opts = {}) {
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   if (String(text ?? '').length <= maxChars) return String(text ?? '');
@@ -314,8 +332,14 @@ export function headTailTruncate(text, opts = {}) {
     ...lines.slice(0, headLines),
     `${MARKER_PREFIX} ${omitted.length} lines omitted]`,
   ];
+  if (opts.grepCounts) {
+    const counts = omittedMatchCounts(lines, omittedStart, omittedEnd);
+    if (counts) output.push(...formatMatchCounts(counts));
+  }
   if (important.length > 0) {
-    output.push(`${MARKER_PREFIX} important omitted lines]`, ...important);
+    const limit = Number.isInteger(opts.maxImportant) && opts.maxImportant >= 0 ? opts.maxImportant : important.length;
+    output.push(`${MARKER_PREFIX} important omitted lines]`, ...important.slice(0, limit));
+    if (important.length > limit) output.push(`${MARKER_PREFIX} ${important.length - limit} more important lines omitted]`);
   }
   output.push(...lines.slice(omittedEnd));
   return output.join('\n').replace(/\n+$/g, '');

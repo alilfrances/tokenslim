@@ -241,6 +241,9 @@ function bump(map, key, init) {
 
 /**
  * Replay every Bash tool result in the transcripts through the production Bash hook core (dry run: no tee, no ledger).
+ * The tee is ASSUMED to succeed (processBashPayload assumeTee) whenever the real tee gates would allow it, because a
+ * dry run cannot write and the opt-in output cap (bash.capChars) only applies when a recovery file exists. capExempt
+ * counts cap-sized results the cap left alone, by reason (diff, json, boundedRead, noReduction, noTee).
  * Limitations: transcripts merge stdout and stderr into one string and carry no exit code, so the whole text is
  * replayed as stdout and failure detection uses its regex fallback. Image, persisted and already-compressed results
  * are counted but not replayed, so the savings denominator is the chars of results actually replayed.
@@ -249,7 +252,7 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now() })
   const files = transcriptFiles({ root, all: true });
   const sinceMs = sinceDays === undefined ? undefined : now - sinceDays * 86400000;
   const skipped = Object.fromEntries(SKIP_REASONS.map((reason) => [reason, 0]));
-  const rules = new Map(); const families = new Map();
+  const rules = new Map(); const families = new Map(); const capExempt = {};
   const total = { scanned: 0, replayed: 0, compressed: 0, charsIn: 0, charsOut: 0, apiCalls: 0, savedTokens: 0, weightedTokens: 0, callsAfterSum: 0 };
   for (const { pairs, calls } of scanTranscripts(files, { sinceMs, tools: ['Bash'] })) {
     total.apiCalls += calls.length;
@@ -267,8 +270,9 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now() })
       family.family = commandFamily(command); family.results += 1; family.charsIn += charsIn;
       let result;
       try {
-        result = processBashPayload({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: pair.text, stderr: '' } }, { config, dryRun: true });
+        result = processBashPayload({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: pair.text, stderr: '' } }, { config, dryRun: true, assumeTee: true });
       } catch { skipped.error += 1; total.charsOut += charsIn; family.charsOut += charsIn; continue; }
+      if (result.capExempt) capExempt[result.capExempt] = (capExempt[result.capExempt] || 0) + 1;
       let charsOut = charsIn;
       if (result.outcome === 'compressed') {
         charsOut = result.updatedToolOutput.stdout.length + result.updatedToolOutput.stderr.length;
@@ -291,6 +295,7 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now() })
     transcripts: root, files: files.length, sinceDays: sinceDays ?? null,
     pairsScanned: total.scanned, skipped, replayed: total.replayed, compressed: total.compressed,
     charsIn: total.charsIn, charsOut: total.charsOut, savedChars, savingsPct: percent(savedChars, total.charsIn),
+    capExempt,
     byRule: [...rules.values()].sort(by),
     byFamily: [...families.values()].map((f) => ({ ...f, savedChars: f.charsIn - f.charsOut, savingsPct: percent(f.charsIn - f.charsOut, f.charsIn) })).sort(by),
     apiCalls: total.apiCalls,
@@ -300,6 +305,11 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now() })
 
 const COST_NOTE = `cost-weighted = sum over compressed results of saved tokens x API calls after the result in the same session (tokens = chars/${CHARS_PER_TOKEN}); it is cache-read tokens avoided, so multiply by your cache-read price for dollars`;
 
+function capExemptLine(report) {
+  const entries = Object.entries(report.capExempt || {}).sort(([a], [b]) => a.localeCompare(b));
+  return entries.length ? [`  output cap left alone: ${entries.map(([reason, count]) => `${reason} ${count.toLocaleString('en-US')}`).join(', ')}`] : [];
+}
+
 export function formatReplayText(report) {
   const n = (value) => value.toLocaleString('en-US');
   const skipLine = Object.entries(report.skipped).filter(([, count]) => count > 0).map(([reason, count]) => `${reason} ${n(count)}`).join(', ') || 'none';
@@ -307,6 +317,7 @@ export function formatReplayText(report) {
     `tokenslim replay: ${n(report.files)} transcript file(s), ${n(report.pairsScanned)} Bash result(s) scanned${report.sinceDays === null ? '' : ` (last ${report.sinceDays} days)`}`,
     `  replayed ${n(report.replayed)}, compressed ${n(report.compressed)}; skipped: ${skipLine}`,
     `  chars in ${n(report.charsIn)}, out ${n(report.charsOut)}, saved ${n(report.savedChars)} = ${report.savingsPct.toFixed(1)}% of all replayed result chars`,
+    ...capExemptLine(report),
     '',
     'by rule (a result can have several rules, so rows overlap):',
     ...(report.byRule.length ? report.byRule.map((r) => `  ${r.rule}  ${n(r.results)} result(s), ${n(r.savedChars)} chars saved`) : ['  (none)']),
@@ -326,6 +337,7 @@ export function formatReplayMarkdown(report) {
     '',
     `Replayed ${n(report.replayed)}, compressed ${n(report.compressed)}. Chars in ${n(report.charsIn)}, out ${n(report.charsOut)}: **${report.savingsPct.toFixed(1)}%** of all replayed result chars.`,
     '',
+    ...capExemptLine(report).flatMap((line) => [`${line.trim()}.`, '']),
     '| Skipped | Count |', '| --- | ---: |',
     ...Object.entries(report.skipped).map(([reason, count]) => `| ${reason} | ${n(count)} |`),
     '',

@@ -182,6 +182,7 @@ was compressed.
 | `TOKENSLIM_MCP_ARRAYS` | off | Set to `1` to collapse >50-item homogeneous arrays in MCP JSON results |
 | `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard hint threshold (lines) |
 | `TOKENSLIM_READ_DEFAULT_LINES` | `2000` | Files longer than this are never cache-warmed after Edit/Write (Read would truncate) |
+| `TOKENSLIM_BASH_CAP_CHARS` | `0` (off) | Mid-band Bash output cap in chars (0 or at least 2000); see Configuration files |
 | `TOKENSLIM_TEE_MIN` | `4096` | Minimum original-output bytes before a lossy Bash/MCP result is saved for recovery |
 | `TOKENSLIM_REWRITE_CODEX` | off | Set to `1` to attempt Claude-style Bash input rewriting in Codex; default is advisory only |
 
@@ -193,8 +194,8 @@ auto-detection is not enough. `Glob` shares the Grep hook and disable path.
 Optional JSON config layers merge in this order: built-in defaults, user
 `$XDG_CONFIG_HOME/tokenslim/config.json` (or `~/.config/...`), project
 `.tokenslim.json`, then environment variables. Malformed files are ignored. The file can
-set `minChars`, `disable`, `readGuardLines`, `readDefaultLines`, `tee` (`enabled`, `mode`, `maxFiles`),
-`rewrite` (`enabled`, `exclude`, `dockerBuild`), and command `filters`. See
+set `minChars`, `disable`, `readGuardLines`, `readDefaultLines`, `tee` (`enabled`, `mode`, `maxFiles`,
+default 100 per session), `bash` (`capChars`, `capHeadLines`, `capTailLines`), `rewrite` (`enabled`, `exclude`, `dockerBuild`), and command `filters`. See
 [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) for rewrite configuration and guards.
 Project filters control successful-command output, so review `.tokenslim.json` in untrusted
 checkouts.
@@ -202,6 +203,14 @@ checkouts.
 When lossy Bash or MCP compression exceeds the tee threshold, tokenslim saves the raw
 output under `$XDG_CACHE_HOME/tokenslim/tee/<session>/<tool-use>.log` and includes its
 path in the marker. Set `tee.mode` to `failures` or `never` to restrict recovery copies.
+
+The optional mid-band Bash cap (`bash.capChars`, off by default; 0 or at least 2000) keeps the
+first `capHeadLines` and last `capTailLines` lines (60 each) of successful output longer than
+`capChars`, notes how many lines were omitted (and, for grep-shaped output, the omitted matches per
+file), and points at the recovery copy. It only applies when that copy was actually written, so it
+never truncates when tee is disabled, below `TOKENSLIM_TEE_MIN`, or in `failures`/`never` mode.
+Diffs, whole-output JSON, and output of a bounded last stage (`head -n N`, `tail -N`,
+`sed -n 'a,bp'`, `awk` with `NR`) up to twice the cap are left alone.
 
 ### Privacy and local storage
 

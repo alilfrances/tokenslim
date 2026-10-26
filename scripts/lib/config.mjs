@@ -9,7 +9,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   disable: [],
   readGuardLines: 2000,
   readDefaultLines: 2000,
-  tee: { enabled: true, mode: 'lossy', maxFiles: 20 },
+  tee: { enabled: true, mode: 'lossy', maxFiles: 100 },
+  // capChars 0 = off. Opt-in mid-band cap: keeps capHeadLines/capTailLines and writes a recovery tee (see bash-hook).
+  bash: { capChars: 0, capHeadLines: 60, capTailLines: 60 },
   rewrite: { enabled: false, exclude: [], dockerBuild: false },
   filters: [],
 });
@@ -42,6 +44,9 @@ function validFilter(value) {
   return filter;
 }
 
+// 0 disables the cap; anything smaller than 2000 chars would truncate ordinary short output.
+const validCapChars = (value) => Number.isInteger(value) && (value === 0 || value >= 2000);
+
 function validLayer(value) {
   if (!plainObject(value)) return null;
   const layer = {};
@@ -55,6 +60,14 @@ function validLayer(value) {
     if (['lossy', 'failures', 'never'].includes(value.tee.mode)) tee.mode = value.tee.mode;
     if (Number.isFinite(value.tee.maxFiles) && value.tee.maxFiles >= 0) tee.maxFiles = value.tee.maxFiles;
     if (Object.keys(tee).length) layer.tee = tee;
+  }
+  if (plainObject(value.bash)) {
+    const bash = {};
+    if (validCapChars(value.bash.capChars)) bash.capChars = value.bash.capChars;
+    for (const key of ['capHeadLines', 'capTailLines']) {
+      if (Number.isInteger(value.bash[key]) && value.bash[key] >= 0) bash[key] = value.bash[key];
+    }
+    if (Object.keys(bash).length) layer.bash = bash;
   }
   if (plainObject(value.rewrite)) {
     const rewrite = {};
@@ -96,7 +109,7 @@ export function mergeConfigLayer(base, layer) {
 function merge(base, layer) {
   if (!layer) return base;
   const next = { ...base, ...layer };
-  for (const key of ['tee', 'rewrite']) next[key] = { ...base[key], ...(layer[key] || {}) };
+  for (const key of ['tee', 'rewrite', 'bash']) next[key] = { ...base[key], ...(layer[key] || {}) };
   return next;
 }
 
@@ -114,6 +127,10 @@ function envLayer(env) {
   if (readDefaultLines !== undefined) layer.readDefaultLines = readDefaultLines;
   if (typeof env.TOKENSLIM_DISABLE === 'string') {
     layer.disable = env.TOKENSLIM_DISABLE.split(',').map((part) => part.trim()).filter(Boolean);
+  }
+  if (typeof env.TOKENSLIM_BASH_CAP_CHARS === 'string' && env.TOKENSLIM_BASH_CAP_CHARS.trim() !== '') {
+    const value = Number(env.TOKENSLIM_BASH_CAP_CHARS);
+    if (validCapChars(value)) layer.bash = { ...(layer.bash || {}), capChars: value };
   }
   if (typeof env.TOKENSLIM_REWRITE_ENABLED === 'string') {
     const value = env.TOKENSLIM_REWRITE_ENABLED.toLowerCase();
@@ -134,7 +151,7 @@ export function loadConfig(cwd = process.cwd(), env = process.env) {
   const configHome = env.XDG_CONFIG_HOME || join(home, '.config');
   const projectPath = join(resolve(cwd), '.tokenslim.json');
   const globalPath = join(configHome, 'tokenslim', 'config.json');
-  const key = JSON.stringify([projectPath, globalPath, env.TOKENSLIM_MIN_CHARS, env.TOKENSLIM_READ_GUARD_LINES, env.TOKENSLIM_READ_DEFAULT_LINES, env.TOKENSLIM_DISABLE, env.TOKENSLIM_REWRITE_ENABLED, env.TOKENSLIM_REWRITE_EXCLUDE, env.TOKENSLIM_REWRITE_DOCKER_BUILD]);
+  const key = JSON.stringify([projectPath, globalPath, env.TOKENSLIM_MIN_CHARS, env.TOKENSLIM_READ_GUARD_LINES, env.TOKENSLIM_READ_DEFAULT_LINES, env.TOKENSLIM_DISABLE, env.TOKENSLIM_REWRITE_ENABLED, env.TOKENSLIM_REWRITE_EXCLUDE, env.TOKENSLIM_REWRITE_DOCKER_BUILD, env.TOKENSLIM_BASH_CAP_CHARS]);
   if (cache.has(key)) return clone(cache.get(key));
   let config = clone(DEFAULT_CONFIG);
   config = merge(config, readLayer(globalPath));
