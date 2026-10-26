@@ -180,7 +180,7 @@ test('replay --audit reports locationLoss 0 on the grep reproduction transcript,
 
 test('processBashPayload matches the spawned hook for every bash fixture', () => {
   const iso = isolatedEnv({ TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) });
-  const stderrFixtures = new Set(['cargo-build.txt', 'docker-pull.txt']);
+  const stderrFixtures = new Set(['cargo-build.txt', 'cargo-build-literal-escapes.txt', 'docker-pull.txt']);
   const config = loadConfig(root, iso.env);
   let compressedCount = 0;
   try {

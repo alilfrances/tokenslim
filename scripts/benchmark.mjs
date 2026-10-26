@@ -23,6 +23,7 @@ const fixtureDirectory = join(root, 'tests', 'fixtures', 'bash');
 // rather than guessing a command from output which would hide coverage regressions.
 export const FIXTURE_COMMANDS = Object.freeze({
   'cargo-build.txt': 'cargo build',
+  'cargo-build-literal-escapes.txt': 'cargo build',
   'docker-ps.txt': 'docker ps',
   'docker-pull.txt': 'docker pull nginx:latest',
   'eslint.txt': 'eslint src',
@@ -30,7 +31,10 @@ export const FIXTURE_COMMANDS = Object.freeze({
   'git-log.txt': 'git log --oneline',
   'git-status-porcelain.txt': 'git status --porcelain=v1 -b',
   'go-test-json.txt': 'go test -json ./...',
+  'jest-failing-blank-lines.txt': 'npx jest',
+  'jest-failing-truncated.txt': 'npx jest 2>&1 | head -80',
   'npm-install.txt': 'npm install',
+  'npm-test-failing-literal-escapes.txt': 'npm test',
   'npm-test-failing.txt': 'npm test',
   'pytest-failing.txt': 'pytest',
   'pytest-passing.txt': 'pytest',
@@ -96,7 +100,7 @@ export function benchmarkFixtures(directory = fixtureDirectory) {
 
 // These tools conventionally send their progress/build stream to stderr. Keeping that
 // split makes this exercise the same production gate as the PostToolUse hook.
-const STDERR_FIXTURES = new Set(['cargo-build.txt', 'docker-pull.txt']);
+const STDERR_FIXTURES = new Set(['cargo-build.txt', 'cargo-build-literal-escapes.txt', 'docker-pull.txt']);
 
 function endToEndOutput(name, input, command) {
   const response = STDERR_FIXTURES.has(name) ? { stdout: '', stderr: input } : { stdout: input, stderr: '' };

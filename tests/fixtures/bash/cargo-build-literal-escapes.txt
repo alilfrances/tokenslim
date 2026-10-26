@@ -1,0 +1,46 @@
+\u001b[32mCompiling\u001b[0m tokenslim v0.1.0 (/workspace/tokenslim)
+   Compiling serde v1.0.204
+   Compiling regex v1.10.5
+   Compiling clap v4.5.9
+   Compiling tokio v1.38.1
+   Compiling bytes v1.6.1
+   Compiling futures-core v0.3.30
+   Compiling futures-util v0.3.30
+   Compiling tracing v0.1.40
+   Compiling tracing-subscriber v0.3.18
+   Compiling anyhow v1.0.86
+   Compiling thiserror v1.0.63
+   Compiling reqwest v0.12.5
+   Compiling hyper v1.4.1
+   Compiling tower v0.4.13
+   Compiling axum v0.7.5
+   Compiling sqlx-core v0.7.4
+   Compiling sqlx-postgres v0.7.4
+   Compiling uuid v1.10.0
+   Compiling chrono v0.4.38
+   Compiling tokenslim v0.1.0 (/workspace/tokenslim)
+   Compiling tokenslim-cli v0.1.0 (/workspace/tokenslim/crates/cli)
+   Compiling tokenslim-hooks v0.1.0 (/workspace/tokenslim/crates/hooks)
+   Compiling tokenslim-fixtures v0.1.0 (/workspace/tokenslim/crates/fixtures)
+   Compiling tokenslim-tests v0.1.0 (/workspace/tokenslim/crates/tests)
+   Compiling tokenslim v0.1.0 (/workspace/tokenslim)
+   Compiling tokenslim-cli v0.1.0 (/workspace/tokenslim/crates/cli)
+   Compiling tokenslim-hooks v0.1.0 (/workspace/tokenslim/crates/hooks)
+   Compiling tokenslim-fixtures v0.1.0 (/workspace/tokenslim/crates/fixtures)
+   Compiling tokenslim-benches v0.1.0 (/workspace/tokenslim/crates/benches)
+   Compiling tokenslim-integration v0.1.0 (/workspace/tokenslim/crates/integration)
+   Compiling tokenslim-macros v0.1.0 (/workspace/tokenslim/crates/macros)
+warning: function `legacy_parser` is never used
+  --> src/parser.rs:84:4
+   |
+84 | fn legacy_parser(input: &str) -> Vec<Token> {
+   |    ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+    Finished dev [unoptimized + debuginfo] target(s) in 12.42s
+     Running unittests src/lib.rs (target/debug/deps/tokenslim-85956c5b72cddc67)
+test parser::tests::keeps_error_lines ... ok
+test parser::tests::drops_progress_lines ... ok
+test pipeline::tests::dedups_stack_traces ... ok
+test pipeline::tests::preserves_failures ... ok
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s

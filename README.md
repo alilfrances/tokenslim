@@ -17,6 +17,7 @@ realistic stderr routing for cargo and docker progress. Real commands vary by pr
 
 | Fixture | Pipeline reduction | E2E bytes out | E2E reduction | Rules applied |
 | --- | ---: | ---: | ---: | --- |
+| cargo-build-literal-escapes.txt | 91.9% | 759 | 63.9% | packageManagerSummary |
 | cargo-build.txt | 91.8% | 701 | 66.5% | packageManagerSummary |
 | docker-ps.txt | 27.6% | 232 | 0.0% | dockerTable |
 | docker-pull.txt | 87.0% | 368 | 83.8% | stripProgressNoise, collapseRepeatedLines |
@@ -25,7 +26,10 @@ realistic stderr routing for cargo and docker progress. Real commands vary by pr
 | git-log.txt | 54.6% | 983 | 53.6% | gitLog |
 | git-status-porcelain.txt | 0.0% | 74 | 0.0% | gitStatus |
 | go-test-json.txt | 87.4% | 261 | 0.0% | goTestJson |
+| jest-failing-blank-lines.txt | 71.3% | 3187 | 0.0% | stripAnsi, summarizeTestRunners |
+| jest-failing-truncated.txt | 71.1% | 2868 | 0.0% | stripAnsi, summarizeTestRunners |
 | npm-install.txt | 96.9% | 172 | 96.1% | packageManagerSummary |
+| npm-test-failing-literal-escapes.txt | 84.9% | 2094 | 0.0% | summarizeTestRunners |
 | npm-test-failing.txt | 85.7% | 2084 | 0.0% | stripAnsi, summarizeTestRunners |
 | pytest-failing.txt | 54.9% | 2107 | 0.0% | summarizeTestRunners |
 | pytest-passing.txt | 96.1% | 112 | 94.5% | testRunnerSummary |

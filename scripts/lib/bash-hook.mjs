@@ -1,6 +1,6 @@
 // Bash PostToolUse core, free of stdin/stdout/ledger I/O so the hook wrapper, the offline replay benchmark and
 // the parity test all run the same code. The wrapper (compress-bash.mjs) owns the ledger and the JSON output.
-import { cleanDisplay, compressBashOutput, headTailTruncate, stripAnsi, stripProgressNoise } from './pipeline.mjs';
+import { cleanDisplay, compressBashOutput, detectionText, headTailTruncate, stripAnsi, stripProgressNoise } from './pipeline.mjs';
 import { commandMeta, compressCommandOutput } from './cmd-compressors/index.mjs';
 import { compressShapeOutput } from './shape-compressors/index.mjs';
 import { FAILURE_RE } from './cmd-compressors/shared.mjs';
@@ -27,12 +27,12 @@ export function failureOutput(stdout, stderr, command, response) {
   // failure channel.
   const exitFailure = observedExitFailure(response);
   if (exitFailure !== null) return exitFailure;
-  if (FAILURE_RE.test(stripAnsi(stderr))) return true;
+  if (FAILURE_RE.test(detectionText(stderr))) return true;
   // Linter diagnostics have a purpose-built, location-preserving compressor. Their
   // stdout diagnostics are the one intentional exception; a failure on stderr still
   // passes through above. commandMeta also handles env/path/launcher forms here.
   const binary = commandMeta(command)?.binary;
-  return !['eslint', 'tsc', 'ruff'].includes(binary) && FAILURE_RE.test(stripAnsi(stdout));
+  return !['eslint', 'tsc', 'ruff'].includes(binary) && FAILURE_RE.test(detectionText(stdout));
 }
 
 function compressStderr(text) {
