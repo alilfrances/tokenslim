@@ -151,7 +151,7 @@ function markCompression(text, rulesApplied) {
 
 /**
  * Decide and build the replacement for one Bash tool response. Pure unless !dryRun, when the lossy original
- * is teed for recovery. Outcomes: disabled, skippedImage, skippedBelowThreshold, skippedFailure,
+ * is teed for recovery. Outcomes: disabled, skippedImage, skippedPersisted, skippedBelowThreshold, skippedFailure,
  * skippedPoorRatio, compressed. bytesOut is what would be emitted (tee marker included); pass-through
  * outcomes report bytesOut === bytesIn and updatedToolOutput null. Throws on internal errors; the hook
  * wrapper fails open.
@@ -175,6 +175,9 @@ export function processBashPayload(payload, { config, env = process.env, dryRun 
   const stderr = stringResponse ? '' : String(response?.stderr ?? '');
   const inputBytes = Buffer.byteLength(stdout, 'utf8') + Buffer.byteLength(stderr, 'utf8');
   if (!stringResponse && response?.isImage === true) return none('skippedImage', inputBytes);
+  // Claude Code persists large results before PostToolUse runs: the hook then sees stdout cut to 30,000 chars plus
+  // persistedOutputPath, and the model only sees a ~2KB preview. Compressing or teeing that cut copy helps no one.
+  if (!stringResponse && (response?.persistedOutputPath || response?.persistedOutputSize)) return none('skippedPersisted', inputBytes);
   const threshold = Number.isFinite(config?.minChars) ? config.minChars : 500;
   if (stdout.length + stderr.length < threshold) return none('skippedBelowThreshold', inputBytes);
 

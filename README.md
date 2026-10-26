@@ -303,7 +303,9 @@ The optional cap (`bash.capChars`, off by default; 0 or at least 2000, or env
 `TOKENSLIM_BASH_CAP_CHARS`) keeps the first `capHeadLines` and last `capTailLines` lines (60 each)
 of successful output longer than `capChars`, notes how many lines were omitted (and, for
 grep-shaped output, the omitted matches per file), and points at the recovery copy. It targets the
-8-30KB band that is too small for Claude Code's own persistence of big results.
+8-30KB band that is too small for Claude Code's own persistence of big results. Results Claude
+Code has already persisted (above ~30KB) are always passed through untouched: the hook only sees a
+cut copy of them and the model only sees Claude Code's preview (see `docs/SHAPES.md`).
 
 - It only applies when a recovery copy was actually written, so it never truncates when tee is
   disabled, below `TOKENSLIM_TEE_MIN`, or in `failures`/`never` mode.

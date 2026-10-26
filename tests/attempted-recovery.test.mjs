@@ -370,3 +370,20 @@ test('stats ledger mode: attempted bytes, recovery diagnostics and old ledgers',
     assert.equal(json.recovery.rate, null);
   } finally { iso.cleanup(); }
 });
+
+test('hooks: a result Claude Code already persisted passes through untouched, uncounted and untee\'d', () => {
+  // Verified on Claude Code 2.1.310: above ~30KB the hook gets stdout cut to 30,000 chars plus persistedOutputPath.
+  const iso = isolatedEnv({ TOKENSLIM_HOOK_RUNTIME: 'claude', TOKENSLIM_BASH_CAP_CHARS: '8000' });
+  try {
+    const stdout = unique(400).join('\n').slice(0, 30000);
+    const tool_response = { stdout, stderr: '', interrupted: false, isImage: false, noOutputExpected: false, persistedOutputPath: '/root/.claude/projects/p/s/tool-results/b1.txt', persistedOutputSize: 60001 };
+    const result = hook('compress-bash.mjs', { session_id: 'persisted', hook_event_name: 'PostToolUse', tool_name: 'Bash', cwd: root, tool_input: { command: 'cat huge.log' }, tool_use_id: 'toolu_p', tool_response }, iso.env);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    const state = ledger(iso, 'persisted');
+    assert.equal(state.diagnostics.Bash.PostToolUse.skippedPersisted, 1);
+    assert.equal(state.attempted?.Bash, undefined);
+    assert.equal(state.diagnostics.Bash.recovery, undefined);
+    assert.throws(() => readFileSync(join(iso.env.XDG_CACHE_HOME, 'tokenslim', 'tee', 'persisted', 'toolu_p.log')));
+  } finally { iso.cleanup(); }
+});

@@ -39,8 +39,9 @@ async function main() {
     }
     recordDiagnostic(state, { tool: 'Bash', event, outcome: 'attempted' });
     const result = processBashPayload(payload, { config, env: process.env });
-    // Every result that reached the size check is a denominator byte, compressed or not; images are not text tokens.
-    if (result.outcome !== 'disabled' && result.outcome !== 'skippedImage') {
+    // Every result that reached the size check is a denominator byte, compressed or not; images are not text tokens and
+    // persisted results are Claude Code's own preview, not ours to save.
+    if (!['disabled', 'skippedImage', 'skippedPersisted'].includes(result.outcome)) {
       recordAttempted(state, { tool: 'Bash', bytes: result.bytesIn, cwd: payload?.cwd });
     }
     const capped = result.outcome === 'compressed' && result.rulesApplied.includes('capMidBand');

@@ -221,7 +221,7 @@ export function formatLatencyText(latencies) {
 
 const CHARS_PER_TOKEN = 4;
 const SKIP_REASONS = ['image', 'persisted', 'alreadyCompressed', 'belowThreshold', 'failure', 'poorRatio', 'disabled', 'error'];
-const OUTCOME_SKIP = { skippedBelowThreshold: 'belowThreshold', skippedFailure: 'failure', skippedPoorRatio: 'poorRatio', skippedImage: 'image', disabled: 'disabled' };
+const OUTCOME_SKIP = { skippedBelowThreshold: 'belowThreshold', skippedFailure: 'failure', skippedPoorRatio: 'poorRatio', skippedImage: 'image', skippedPersisted: 'persisted', disabled: 'disabled' };
 
 // Number of API calls (distinct assistant messages with usage) after line `seq`: calls are in line order.
 function callsAfter(calls, seq) {

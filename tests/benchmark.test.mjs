@@ -204,6 +204,7 @@ test('processBashPayload dryRun never tees; a real run does, and each outcome is
     const outcome = (response, cfg = config, command) => processBashPayload(payload(response, command), { config: cfg, env: iso.env, dryRun: true }).outcome;
     assert.equal(outcome({ stdout: 'tiny', stderr: '' }), 'skippedBelowThreshold');
     assert.equal(outcome({ stdout: body, stderr: '', isImage: true }), 'skippedImage');
+    assert.equal(outcome({ stdout: body, stderr: '', persistedOutputPath: '/x/tool-results/a.txt', persistedOutputSize: 60001 }), 'skippedPersisted');
     assert.equal(outcome({ stdout: body, stderr: '', exitCode: 1 }), 'skippedFailure');
     assert.equal(outcome({ stdout: body, stderr: '' }, { ...config, disable: ['bash'] }), 'disabled');
     const unique = Array.from({ length: 24 }, (_, i) => `entry ${i}: ${(i * 2654435761 >>> 0).toString(16)}-${(i * 40503 + 7).toString(36)} unique payload row ${i * 17}`).join('\n');
