@@ -113,3 +113,30 @@ results in `filenames` — those are already compact; pass through.
 No single text field. Compression = shorten the `filenames` string array (grouped
 summaries are still strings, shape stays valid). `durationMs` is nondeterministic — copy
 verbatim, never synthesize.
+
+## Open: PostToolUse vs native output persistence
+
+Claude Code persists tool results above roughly 30KB itself and shows the model a short
+preview with a `<persisted-output>` block. It is **not yet verified** whether a
+`PostToolUse` hook sees the raw output (hook runs before persistence) or only that preview
+(hook runs after). This matters for the Bash output cap (`bash.capChars`): the cap targets
+the 8-30KB band that persistence never touches, so it works either way, but results above
+~30KB may need to be skipped as already persisted if the hook only sees previews.
+
+Probe procedure (needs a real Claude Code with credentials; the spike has **not been run**,
+so the result is pending live verification):
+
+1. Install a throwaway plugin whose `PostToolUse` Bash hook logs
+   `tool_response.stdout.length` and returns `updatedToolOutput` with stdout replaced by
+   `"PROBE " + length`.
+2. Run `claude -p 'run: python3 -c "print(\"x\"*60000)"'`, then inspect the session
+   transcript.
+3. Interpret:
+   - Hook logged 60000 and the transcript `tool_result` is `PROBE 60000` with no
+     `<persisted-output>`: the hook runs **before** persistence, so the cap covers outputs
+     above 30KB too. No code change needed.
+   - Hook logged a ~2KB preview: it runs **after** persistence. Exclude persisted results in
+     the Bash hook (as `scripts/lib/transcripts.mjs` already flags `isPersisted` for replay)
+     and document it here.
+
+Until this is run, tokenslim makes no assumption either way.
