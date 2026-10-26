@@ -1,4 +1,4 @@
-\u001b[31mFAIL\u001b[0m src/math.test.js > add() > returns the full invoice total
+[31mFAIL[0m src/math.test.js > add() > returns the full invoice total
   AssertionError: expected 41 to deeply equal 42
   Expected: 42
   Received: 41

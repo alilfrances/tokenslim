@@ -219,7 +219,7 @@ function manualReason(row, config) {
       ? ['manual: /plugin', `ambiguous: several enabledPlugins keys match (${keys.map(([k]) => k).join(', ')}); disable the right one with /plugin`]
       : ['manual: /plugin', 'no enabledPlugins key found in user or project settings; disable it with /plugin'];
   }
-  if (row.kind === 'skill') return ['manual: remove SKILL.md', 'user/project skill: remove or move its SKILL.md (bundled skills cannot be pruned)'];
+  if (row.kind === 'skill') return ['manual: SKILL.md*', 'user/project or built-in skill: remove its SKILL.md if it is user/project-defined; built-in skills (e.g. loop, init, simplify) cannot be removed'];
   if (row.kind === 'agent') return ['manual: remove agent file', 'user/project agent: remove or move its agent file (built-in agents cannot be pruned)'];
   return [row.kind === 'builtin' ? 'built-in' : 'not prunable', 'not prunable'];
 }
@@ -307,6 +307,9 @@ export function emitSettings(report, config) {
 const fmt = (n) => n.toLocaleString('en-US');
 const pctText = (value) => (value === null ? '-' : `${value}%`);
 
+// A skill without a `plugin:` prefix is user/project-defined or built into Claude Code; the listing cannot tell which.
+const kindLabel = (kind) => (kind === 'skill' ? 'skill (user/built-in)' : kind);
+
 export function renderReport(report) {
   if (!report.sessions) return 'tokenslim budget: no transcripts found.';
   const s = report.summary;
@@ -319,18 +322,19 @@ export function renderReport(report) {
     '  weighted tokens = size in tokens (chars/4) x API calls that carried it',
   ];
   if (report.rows.length) {
-    const cell = (r) => [r.kind, r.name, fmt(r.tokensPerSession), fmt(r.weightedTokens), pctText(r.pctInput), r.uses === null ? '-' : String(r.uses), r.prunable ? `via ${r.how}` : r.how];
+    const cell = (r) => [kindLabel(r.kind), r.name, fmt(r.tokensPerSession), fmt(r.weightedTokens), pctText(r.pctInput), r.uses === null ? '-' : String(r.uses), r.prunable ? `via ${r.how}` : r.how];
     const table = report.rows.map(cell);
     const head = ['kind', 'name', 'tok/session', 'weighted', '%input', 'uses', 'prune'];
     const widths = head.map((h, i) => Math.max(h.length, ...table.map((row) => row[i].length)));
     const line = (row) => '  ' + row.map((c, i) => (i >= 2 && i <= 5 ? c.padStart(widths[i]) : c.padEnd(widths[i]))).join('  ').trimEnd();
     lines.push(`overhead by source (top ${report.rows.length} of ${report.rowCount}):`, line(head), ...table.map(line));
+    if (report.rows.some((r) => r.kind === 'skill')) lines.push('  * a skill without a plugin prefix is user/project-defined or built into Claude Code: remove its SKILL.md only if you defined it; built-in skills cannot be removed.');
   }
   const other = Object.entries(report.otherTypes);
   if (other.length) lines.push(`other attachment types counted: ${other.map(([t, n]) => `${t} x${n}`).join(', ')}`);
   lines.push(`unused candidates (0 uses, >= ${fmt(report.minTokens)} weighted tokens):`);
   lines.push(...(report.candidates.length
-    ? report.candidates.map((r) => `  ${r.kind} ${r.name}  ~${fmt(r.weightedTokens)} weighted tokens, ${r.prunable ? `prune via ${r.how}` : r.how}`)
+    ? report.candidates.map((r) => `  ${kindLabel(r.kind)} ${r.name}  ~${fmt(r.weightedTokens)} weighted tokens, ${r.prunable ? `prune via ${r.how}` : r.how}`)
     : ['  (none)']));
   if (report.candidates.length) lines.push('run with --emit-settings to print a settings.local.json snippet (it never writes any file).');
   return lines.join('\n');

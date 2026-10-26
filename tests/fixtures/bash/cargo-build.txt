@@ -1,4 +1,4 @@
-\u001b[32mCompiling\u001b[0m tokenslim v0.1.0 (/workspace/tokenslim)
+[32mCompiling[0m tokenslim v0.1.0 (/workspace/tokenslim)
    Compiling serde v1.0.204
    Compiling regex v1.10.5
    Compiling clap v4.5.9

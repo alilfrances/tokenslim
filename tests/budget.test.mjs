@@ -93,6 +93,11 @@ test('budget lists unused candidates above the threshold and nothing used or hoo
   const text = run(t, box, ['--since', '3650', '--min-tokens', '100']);
   assert.match(text.stdout, /unused candidates \(0 uses, >= 100 weighted tokens\):/);
   assert.match(text.stdout, /mcp beta_srv {2}~440 weighted tokens/);
+  // Unprefixed skills may be built into Claude Code, so the report must not tell the user to remove a SKILL.md outright.
+  assert.match(text.stdout, /skill \(user\/built-in\) +beta .*manual: SKILL\.md\*/);
+  assert.match(text.stdout, /\* a skill without a plugin prefix is user\/project-defined or built into Claude Code.*built-in skills cannot be removed/);
+  assert.doesNotMatch(text.stdout, /manual: remove SKILL\.md/);
+  assert.match(text.stdout, /skill \(user\/built-in\) beta {2}~100 weighted tokens, manual: SKILL\.md\*/);
 });
 
 test('budget output carries names and sizes only, never prompt or attachment text', (t) => {
@@ -123,7 +128,8 @@ test('--emit-settings prints a snippet resolved against .mcp.json and settings, 
   assert.equal(emitted.file, join(box.project, '.claude', 'settings.local.json'));
   assert.deepEqual(emitted.settings, { enabledPlugins: { 'acme@market': false }, disabledMcpjsonServers: ['beta_srv'] });
   assert.deepEqual(emitted.manual.map((m) => [m.kind, m.name]), [['skill', 'beta']]);
-  assert.match(emitted.manual[0].reason, /user\/project skill/);
+  assert.match(emitted.manual[0].reason, /user\/project or built-in skill/);
+  assert.match(emitted.manual[0].reason, /built-in skills .*cannot be removed/);
 
   const text = run(t, box, ['--since', '3650', '--min-tokens', '100', '--emit-settings']);
   assert.match(text.stdout, /printed only, nothing was written/);

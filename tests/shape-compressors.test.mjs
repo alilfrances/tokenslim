@@ -212,13 +212,29 @@ test('hook: shape dispatch ignores the command, so pipes and chains still group,
   }
 });
 
-test('hook: when generic rules also change the grouped text lossily the original is still teed', () => {
-  // A literal `\r` in source text makes the generic progress-noise rule drop the text before it.
-  const lines = [...numbered('src/a.js', 1, 10), "src/a.js:40:const crlf = s.replace(/\\r\\n/g, '\\n');", ...numbered('src/a.js', 50, 3)];
+test('hook: a literal \\r in source text survives grouping verbatim and is not a lossy change', () => {
+  const crlf = "src/a.js:40:const crlf = s.replace(/\\r\\n/g, '\\n');";
+  const lines = [...numbered('src/a.js', 1, 10), crlf, ...numbered('src/a.js', 50, 3)];
   const input = `${lines.join('\n')}\n`;
   const { result, teed } = run(input);
   assert.equal(result.outcome, 'compressed');
   assert.ok(result.rulesApplied.includes('groupByPath'));
+  assert.ok(!result.rulesApplied.includes('stripProgressNoise'));
+  assert.equal(result.recoveryPath, null);
+  assert.deepEqual(teed, []);
+  const body = result.updatedToolOutput.stdout.replace(/\n\[tokenslim: [^\]]*\]$/, '');
+  assert.equal(ungroup(body), input.replace(/\n+$/g, ''));
+});
+
+test('hook: when generic rules also change the grouped text lossily the original is still teed', () => {
+  // A bare spinner line between groups is dropped by the generic progress rule, which is lossy.
+  const path = 'src/components/deeply/nested/widget.js';
+  const lines = [...numbered(path, 1, 30), '|', ...numbered(path, 50, 30)];
+  const input = `${lines.join('\n')}\n`;
+  const { result, teed } = run(input);
+  assert.equal(result.outcome, 'compressed');
+  assert.ok(result.rulesApplied.includes('groupByPath'));
+  assert.ok(result.rulesApplied.includes('stripProgressNoise'));
   assert.ok(result.recoveryPath, 'lossy generic change is teed');
   assert.equal(teed.length > 0, true);
 });

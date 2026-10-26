@@ -48,6 +48,47 @@ test('stripProgressNoise keeps final carriage-return state and marks omitted pro
   assert.equal(stripProgressNoise(input), 'start\nDownloading 100%\nfinal\n[tokenslim: 2 progress lines omitted]');
 });
 
+test('stripProgressNoise only treats a real carriage return as an overwrite', () => {
+  // Source lines contain the two characters backslash+r; printing them must never delete text.
+  const source = '  return String(text).replace(/\\r\\n/g, "\\n");';
+  assert.equal(stripProgressNoise(source), source);
+  const cString = 'printf("done\\r\\n");\nputs("x");';
+  assert.equal(stripProgressNoise(cString), cString);
+  // A real progress line still collapses to its final segment.
+  assert.equal(stripProgressNoise('10%\r50%\r100%'), '100%');
+  // CRLF remnants and a bare trailing CR keep the visible text.
+  assert.equal(stripProgressNoise('abc\r'), 'abc');
+  assert.equal(stripProgressNoise('abc\r\r'), 'abc');
+  assert.equal(stripProgressNoise('one\r\ntwo\r'), 'one\ntwo');
+  assert.equal(stripProgressNoise('a\r\rb'), 'b');
+});
+
+test('literal \\r and \\u001b text pass through compressBashOutput byte-identical', () => {
+  const source = [
+    '  return String(text).replace(/\\r\\n/g, "\\n");',
+    "  assert.equal(stripAnsi('\\u001b[31mERR\\u001b[0m'), 'ERR');",
+    '  const red = "\\u001b[31m";',
+    ...Array.from({ length: 30 }, (_, i) => `  const unique${i} = compute(${i * 7919});`),
+  ].join('\n');
+  const { text, stats } = compressBashOutput(source);
+  assert.equal(text, source);
+  assert.deepEqual(stats.rulesApplied, []);
+  assert.equal(stripAnsi('x \\u001b[31mred'), 'x \\u001b[31mred');
+  // Real ESC bytes are still removed.
+  assert.equal(compressBashOutput(`\u001b[31mred\u001b[0m\n${source}`).text, `red\n${source}`);
+});
+
+test('rule attribution ignores a pure trailing-newline difference', () => {
+  const clean = Array.from({ length: 40 }, (_, i) => `row ${i} ${'abcdefghij'.repeat(i % 7 + 1)}${i * 31}`).join('\n');
+  for (const input of [`${clean}\n`, `${clean}\n\n\n`]) {
+    const { text, stats } = compressBashOutput(input);
+    assert.deepEqual(stats.rulesApplied, []);
+    assert.equal(text.replace(/\n+$/g, ''), clean);
+  }
+  // A real change is still attributed.
+  assert.deepEqual(compressBashOutput(`${clean}\n10%\r100%\n`).stats.rulesApplied, ['stripProgressNoise']);
+});
+
 test('stripProgressNoise never treats Markdown, YAML, or CLI bullets as spinners', () => {
   const input = '- first item\n- second item\n- name: value\n- option: enable verbose output\n';
   assert.equal(stripProgressNoise(input), input.trimEnd());

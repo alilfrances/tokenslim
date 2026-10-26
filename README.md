@@ -15,21 +15,21 @@ realistic stderr routing for cargo and docker progress. Real commands vary by pr
 
 | Fixture | Pipeline reduction | E2E bytes out | E2E reduction | Rules applied |
 | --- | ---: | ---: | ---: | --- |
-| cargo-build.txt | 91.9% | 701 | 66.6% | packageManagerSummary |
+| cargo-build.txt | 91.8% | 701 | 66.5% | packageManagerSummary |
 | docker-ps.txt | 27.6% | 232 | 0.0% | dockerTable |
-| docker-pull.txt | 87.1% | 368 | 84.0% | stripProgressNoise, collapseRepeatedLines |
+| docker-pull.txt | 87.0% | 368 | 83.8% | stripProgressNoise, collapseRepeatedLines |
 | eslint.txt | 1.0% | 202 | 0.0% | linterDiagnostics |
 | git-diff.txt | 18.0% | 128 | 0.0% | gitDiff |
 | git-log.txt | 54.6% | 983 | 53.6% | gitLog |
 | git-status-porcelain.txt | 0.0% | 74 | 0.0% | gitStatus |
 | go-test-json.txt | 87.4% | 261 | 0.0% | goTestJson |
 | npm-install.txt | 96.9% | 172 | 96.1% | packageManagerSummary |
-| npm-test-failing.txt | 85.8% | 2094 | 0.0% | stripAnsi, stripProgressNoise, summarizeTestRunners |
-| pytest-failing.txt | 54.9% | 2107 | 0.0% | stripProgressNoise, summarizeTestRunners |
+| npm-test-failing.txt | 85.7% | 2084 | 0.0% | stripAnsi, summarizeTestRunners |
+| pytest-failing.txt | 54.9% | 2107 | 0.0% | summarizeTestRunners |
 | pytest-passing.txt | 96.1% | 112 | 94.5% | testRunnerSummary |
-| stacktrace-repeat.txt | 72.5% | 636 | 70.2% | stripProgressNoise, dedupStackTraces |
+| stacktrace-repeat.txt | 72.5% | 616 | 71.1% | dedupStackTraces |
 | tsc.txt | 0.4% | 238 | 0.0% | linterDiagnostics |
-| webpack-build.txt | 0.0% | 2102 | 0.0% | stripProgressNoise |
+| webpack-build.txt | 0.0% | 2102 | 0.0% | none |
 
 Re-read stubs can save roughly 99% when an unchanged file is read again. Dense unique output
 is intentionally left untouched. Savings compound because input tokens are re-sent every turn.
