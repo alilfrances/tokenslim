@@ -1,0 +1,12 @@
+{
+  "name": "demo",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node --test",
+    "build": "echo \"x\": y"
+  },
+  "files": [
+    "a",
+    "b"
+  ]
+}

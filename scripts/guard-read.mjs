@@ -2,8 +2,12 @@
 // PreToolUse guard for large unbounded Read calls.
 
 import { existsSync, statSync, openSync, readSync, closeSync, readFileSync as readStdinSync } from 'node:fs';
-import { preToolUseAdditionalContextOutput } from './lib/hook-output.mjs';
+import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+import { detectRuntime, preToolUseAdditionalContextOutput, preToolUseDenyOutput } from './lib/hook-output.mjs';
 import { loadConfig } from './lib/config.mjs';
+import { isTextLikePath, outlineFile } from './lib/outline.mjs';
+import { consumeGuardDeny } from './lib/state.mjs';
 
 const DEFAULT_THRESHOLD = 2000;
 const CHARS_PER_TOKEN = 3;
@@ -41,6 +45,33 @@ function hasBounds(input) {
   return Boolean(input && (input.offset != null || input.limit != null));
 }
 
+// Deny mode: first unbounded Read of a big text file is refused with a size line and outline; repeating
+// the identical Read is allowed (the state entry is consumed, so a later third Read starts a new cycle).
+// Returns false to fall back to the advisory hint (not a deny candidate), true when handled.
+function denyOrAllow(payload, filePath, size, lineInfo) {
+  if (!isTextLikePath(filePath) || typeof payload?.session_id !== 'string' || !payload.session_id) return false;
+  if (detectRuntime(payload) === 'codex') return false;
+  const verdict = consumeGuardDeny(payload.session_id, createHash('sha256').update(resolve(filePath)).digest('hex'));
+  if (verdict !== 'deny') return true;
+  let outline = null;
+  try {
+    outline = outlineFile(filePath, size);
+  } catch {
+    // unreadable now: still deny with the size line; the repeat Read will surface the real error
+  }
+  const lines = lineInfo.capped ? `>${lineInfo.lines}` : String(outline && !outline.partial ? outline.totalLines : lineInfo.lines);
+  const kb = Math.max(1, Math.round(size / 1024));
+  const parts = [`[tokenslim] ${filePath} is ${lines} lines, ${kb} KB (~${Math.round(size / CHARS_PER_TOKEN)} tokens); the full Read was held back.`];
+  if (outline && outline.entries.length) {
+    parts.push('Outline:', ...outline.entries);
+    if (outline.more) parts.push(`… ${outline.more} more`);
+    if (outline.partial) parts.push('(outline covers the first 1MB only)');
+  }
+  parts.push('Re-read with offset/limit for the section you need. Repeating this exact Read will return the full file.');
+  process.stdout.write(JSON.stringify(preToolUseDenyOutput(payload, parts.join('\n'))));
+  return true;
+}
+
 function main(inputText) {
   let payload;
   try {
@@ -49,7 +80,7 @@ function main(inputText) {
     return;
   }
   const config = loadConfig(payload?.cwd || process.cwd(), process.env);
-  if (isDisabled(config)) return;
+  if (isDisabled(config) || config.readGuard?.mode === 'off') return;
 
   const toolInput = payload?.tool_input || {};
   const filePath = toolInput.file_path;
@@ -69,8 +100,17 @@ function main(inputText) {
     return;
   }
 
-  const threshold = Number.isFinite(config.readGuardLines) ? config.readGuardLines : DEFAULT_THRESHOLD;
-  if (!lineInfo.capped && lineInfo.lines <= threshold) return;
+  const threshold = Number.isFinite(config.readGuard?.lines) ? config.readGuard.lines : DEFAULT_THRESHOLD;
+  const maxBytes = config.readGuard?.bytes > 0 ? config.readGuard.bytes : 0;
+  if (!lineInfo.capped && lineInfo.lines <= threshold && !(maxBytes && size > maxBytes)) return;
+
+  if (config.readGuard?.mode === 'deny') {
+    try {
+      if (denyOrAllow(payload, filePath, size, lineInfo)) return;
+    } catch {
+      return;
+    }
+  }
 
   const lines = lineInfo.capped ? `>${lineInfo.lines}` : String(lineInfo.lines);
   const tokens = Math.round(size / CHARS_PER_TOKEN);

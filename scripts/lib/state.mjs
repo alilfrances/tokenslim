@@ -198,3 +198,31 @@ export function summarize(state) {
     diagnostics: (state && state.diagnostics) || {},
   };
 }
+
+const GUARD_DENIED_MAX = 200;
+
+// Read-guard deny escape hatch: one load and at most one small write. `key` is sha256(path), so no raw
+// paths reach the ledger. Returns 'deny' when this is the first unbounded Read (entry recorded),
+// 'allow' when a deny is already pending (entry consumed, so a later third Read starts a new deny cycle),
+// and 'error' when a first deny could not be recorded: the caller must then stay silent, because a deny
+// that cannot be followed by an allowed repeat would block the Read for good.
+export function consumeGuardDeny(sessionId, key) {
+  try {
+    const state = loadState(sessionId);
+    const denied = state.guardDenied && typeof state.guardDenied === 'object' ? state.guardDenied : {};
+    if (Object.hasOwn(denied, key)) {
+      delete denied[key];
+      state.guardDenied = denied;
+      try { secureWriteState(sessionId, state); } catch { /* a stale entry only delays the next deny cycle */ }
+      return 'allow';
+    }
+    denied[key] = Date.now();
+    const keys = Object.keys(denied);
+    for (const old of keys.slice(0, Math.max(0, keys.length - GUARD_DENIED_MAX))) delete denied[old];
+    state.guardDenied = denied;
+    secureWriteState(sessionId, state);
+    return 'deny';
+  } catch {
+    return 'error';
+  }
+}

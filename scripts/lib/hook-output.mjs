@@ -135,6 +135,17 @@ export function preToolUseAdditionalContextOutput(payload, additionalContext) {
   };
 }
 
+// Documented Claude Code shape; the reason is shown to the model. Callers keep Codex on the advisory output.
+export function preToolUseDenyOutput(payload, reason) {
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  };
+}
+
 // Codex does not yet document updatedInput for PreToolUse. Its default is therefore
 // advisory-only; TOKENSLIM_REWRITE_CODEX is an explicit compatibility escape hatch.
 export function preToolUseRewriteOutput(payload, command, rules, env = process.env) {
