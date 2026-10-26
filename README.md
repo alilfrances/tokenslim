@@ -227,6 +227,7 @@ and how often it was actually used.
 
 ```bash
 node scripts/benchmark.mjs --transcripts <dir> [--since N] [--format text|json|md] [--config <file>] [--audit]
+node scripts/benchmark.mjs --transcripts <dir> --classify [--classify-lines N] [--format text|json]
 ```
 
 Replays every Bash result in the transcripts under `<dir>` (a Claude `projects` directory, or any
@@ -243,6 +244,17 @@ stderr and do not record exit codes, so failure detection falls back to a text h
 also checks, for every compressed result, that each grep hit location (`path:line`) in the input is
 still recoverable from the output (grouped output is expanded first) and reports `locationLoss: N`
 with up to five example `tool_use` ids; it should always be 0. Without `--transcripts` the command prints the fixture benchmark above.
+
+`--transcripts <dir> --classify [--classify-lines N] [--format text|json]` measures what kind of output your Bash
+results are, so you can see where the characters (and the cost-weighted characters) actually go. Every non-image result lands in
+exactly one bucket, first match wins: `fileDump` (the command is a whole-file dump of one file: `cat F`, `nl F`,
+`sed -n '1,$p' F`, `tail -n +1 F` or `head -n N F` with N of at least 400, optionally after `cd X &&`; pipes,
+redirects, globs, heredocs and several files do not count), `grep` (grep-shaped output), `pathList` (at least 8 lines, 80% of
+them paths), `testRunner`, `json`, `other`; results Claude Code already persisted are their own bucket. File dumps are also split by
+size (up to 400, 401 to 2000, over 2000 lines), and the report prints an upper bound of what an outline-first guard could save
+(dump chars minus the size line, outline and instruction the read guard would show instead, assuming the model never
+reads the file afterwards; `--classify-lines` sets the 400-line threshold) and a go/no-go line against an 8% share of Bash
+characters. The report holds counts and sizes only, never command text or paths.
 
 ## Configuration (env vars)
 

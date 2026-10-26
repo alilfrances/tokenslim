@@ -8,9 +8,9 @@ import { detectRuntime, preToolUseAdditionalContextOutput, preToolUseDenyOutput 
 import { loadConfig } from './lib/config.mjs';
 import { isTextLikePath, outlineFile } from './lib/outline.mjs';
 import { consumeGuardDeny } from './lib/state.mjs';
+import { CHARS_PER_TOKEN, guardDenyReason } from './lib/guard-reason.mjs';
 
 const DEFAULT_THRESHOLD = 2000;
-const CHARS_PER_TOKEN = 3;
 const COUNT_BYTE_CAP = 5 * 1024 * 1024;
 
 function isDisabled(config) {
@@ -59,16 +59,8 @@ function denyOrAllow(payload, filePath, size, lineInfo) {
   } catch {
     // unreadable now: still deny with the size line; the repeat Read will surface the real error
   }
-  const lines = lineInfo.capped ? `>${lineInfo.lines}` : String(outline && !outline.partial ? outline.totalLines : lineInfo.lines);
-  const kb = Math.max(1, Math.round(size / 1024));
-  const parts = [`[tokenslim] ${filePath} is ${lines} lines, ${kb} KB (~${Math.round(size / CHARS_PER_TOKEN)} tokens); the full Read was held back.`];
-  if (outline && outline.entries.length) {
-    parts.push('Outline:', ...outline.entries);
-    if (outline.more) parts.push(`… ${outline.more} more`);
-    if (outline.partial) parts.push('(outline covers the first 1MB only)');
-  }
-  parts.push('Re-read with offset/limit for the section you need. Repeating this exact Read will return the full file.');
-  process.stdout.write(JSON.stringify(preToolUseDenyOutput(payload, parts.join('\n'))));
+  const reason = guardDenyReason({ filePath, size, lineInfo, outline });
+  process.stdout.write(JSON.stringify(preToolUseDenyOutput(payload, reason)));
   return true;
 }
 

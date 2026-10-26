@@ -184,7 +184,7 @@ function isPassingTestLine(line) {
   return /\b(?:PASSED|PASS|ok)\b/.test(text) && !FAIL_LINE_RE.test(text);
 }
 
-function isTestOutput(lines) {
+export function isTestOutput(lines) {
   // Repeated copies of the same line are not independent evidence that this is
   // runner output (logs and source snippets can contain them too).
   const views = lines.map(detectionText);

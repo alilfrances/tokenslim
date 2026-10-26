@@ -15,6 +15,9 @@ import { loadConfig, loadConfigLayerFile, mergeConfigLayer } from './lib/config.
 import { processBashPayload } from './lib/bash-hook.mjs';
 import { commandFamily } from './lib/privacy.mjs';
 import { scanTranscripts, transcriptFiles } from './lib/transcripts.mjs';
+import { BUCKETS, SIZE_LABELS, classifyOutput, lineCount, sizeBucket } from './lib/classify.mjs';
+import { isTextLikePath, languageFor, outlineText } from './lib/outline.mjs';
+import { BASH_DUMP_INSTRUCTION, guardDenyReason } from './lib/guard-reason.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureDirectory = join(root, 'tests', 'fixtures', 'bash');
@@ -328,6 +331,110 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now(), a
   };
 }
 
+// --- WP3 (v0.5.0): classify Bash results by output kind and size the outline-first opportunity ---------------------------
+const DEFAULT_CLASSIFY_LINES = 400;
+const GO_THRESHOLD_PCT = 8;
+
+// Length of the deny reason the read guard would produce for this dump (size line + outline + fixed instruction), built
+// from the output text alone: the file is never touched. `nl` output has its line-number gutter stripped first so the
+// outline sees source text. The operand is used in memory only (outline language and the reason's path text).
+function outlineReasonChars(text, dump) {
+  const body = dump.form === 'nl' ? text.replace(/^[ \t]*\d+\t/gm, '') : text;
+  let outline = null;
+  try { outline = outlineText(body, languageFor(dump.file)); } catch { /* no outline: size line only, like the guard */ }
+  return guardDenyReason({
+    filePath: dump.file, size: Buffer.byteLength(body, 'utf8'), lineInfo: { lines: lineCount(body), capped: false },
+    outline, subject: 'output', instruction: BASH_DUMP_INSTRUCTION,
+  }).length;
+}
+
+/**
+ * Bucket every non-image Bash result (see classifyOutput for the rules, first match wins; persisted results are their
+ * own bucket and already-compressed ones are classified like the rest and flagged) with chars and cost-weighted chars
+ * (chars x API calls after the result in the same session). For fileDump, also the dumps over `lines` and an UPPER
+ * BOUND on outline-first savings: for every such dump on a text-allowlisted file (isTextLikePath, the files the guard
+ * may withhold), output chars minus the deny reason's chars (never below 0), assuming the model never reads the
+ * file afterwards. Reports counts and chars only: no command text, no paths.
+ */
+export function classifyTranscripts({ root, sinceDays, lines = DEFAULT_CLASSIFY_LINES, now = Date.now() }) {
+  const files = transcriptFiles({ root, all: true });
+  const sinceMs = sinceDays === undefined ? undefined : now - sinceDays * 86400000;
+  const rows = new Map([...BUCKETS, 'persisted'].map((bucket) => [bucket, { bucket, count: 0, chars: 0, weightedChars: 0, compressed: 0 }]));
+  const sizes = new Map(SIZE_LABELS.map((label) => [label, { lines: label, count: 0, chars: 0 }]));
+  const forms = new Map();
+  const over = { count: 0, chars: 0, weightedChars: 0 };
+  const bound = { dumps: 0, outlineChars: 0, savedChars: 0, weightedSavedChars: 0, notTextFile: 0, notTextChars: 0 };
+  let images = 0; let apiCalls = 0;
+  for (const { pairs, calls } of scanTranscripts(files, { sinceMs, tools: ['Bash'] })) {
+    apiCalls += calls.length;
+    for (const pair of pairs) {
+      const command = pair.input.command;
+      if (typeof command !== 'string') continue;
+      if (pair.isImage) { images += 1; continue; }
+      const chars = pair.text.length;
+      const weight = callsAfter(calls, pair.seq);
+      let bucket = 'persisted'; let dump = null;
+      if (!pair.isPersisted) {
+        try { ({ bucket, dump } = classifyOutput(pair.text, command)); } catch { bucket = 'other'; dump = null; }
+      }
+      const row = rows.get(bucket);
+      row.count += 1; row.chars += chars; row.weightedChars += chars * weight;
+      if (pair.isCompressed) row.compressed += 1;
+      if (!dump) continue;
+      const size = sizes.get(sizeBucket(lineCount(pair.text)));
+      size.count += 1; size.chars += chars;
+      const form = bump(forms, dump.form, { form: dump.form, count: 0, chars: 0 });
+      form.count += 1; form.chars += chars;
+      if (lineCount(pair.text) <= lines) continue;
+      over.count += 1; over.chars += chars; over.weightedChars += chars * weight;
+      if (!isTextLikePath(dump.file)) { bound.notTextFile += 1; bound.notTextChars += chars; continue; }
+      const outlineChars = outlineReasonChars(pair.text, dump);
+      const saved = Math.max(0, chars - outlineChars);
+      bound.dumps += 1; bound.outlineChars += outlineChars; bound.savedChars += saved; bound.weightedSavedChars += saved * weight;
+    }
+  }
+  const total = [...rows.values()].reduce((sum, row) => ({ count: sum.count + row.count, chars: sum.chars + row.chars, weightedChars: sum.weightedChars + row.weightedChars }), { count: 0, chars: 0, weightedChars: 0 });
+  const pct = (part, whole) => (whole === 0 ? 0 : (part / whole) * 100);
+  const overPct = pct(over.chars, total.chars);
+  return {
+    transcripts: root, files: files.length, sinceDays: sinceDays ?? null, apiCalls, imagesSkipped: images,
+    results: total.count, chars: total.chars, weightedChars: total.weightedChars,
+    buckets: [...rows.values()].map((row) => ({ ...row, pctChars: pct(row.chars, total.chars), pctWeighted: pct(row.weightedChars, total.weightedChars) })),
+    fileDump: {
+      bySize: [...sizes.values()].map((size) => ({ ...size, pctChars: pct(size.chars, total.chars) })),
+      byForm: [...forms.values()].sort((a, b) => a.form.localeCompare(b.form)),
+      threshold: lines,
+      overThreshold: { ...over, pctChars: overPct, pctWeighted: pct(over.weightedChars, total.weightedChars) },
+      outlineUpperBound: { ...bound, pctOfBashChars: pct(bound.savedChars, total.chars), pctOfWeighted: pct(bound.weightedSavedChars, total.weightedChars) },
+    },
+    goNoGo: { lines, pct: overPct, thresholdPct: GO_THRESHOLD_PCT, go: overPct >= GO_THRESHOLD_PCT },
+  };
+}
+
+export function formatClassifyText(report) {
+  const n = (value) => Math.round(value).toLocaleString('en-US');
+  const p = (value) => `${value.toFixed(1)}%`;
+  const headings = ['bucket', 'results', 'chars', '% chars', 'cost-weighted', '% weighted', 'compressed'];
+  const body = report.buckets.map((r) => [r.bucket, n(r.count), n(r.chars), p(r.pctChars), n(r.weightedChars), p(r.pctWeighted), n(r.compressed)]);
+  const widths = headings.map((heading, column) => Math.max(heading.length, ...body.map((row) => row[column].length)));
+  const render = (row) => row.map((cell, column) => pad(cell, widths[column], column > 0 && column < 6)).join('  ').trimEnd();
+  const dump = report.fileDump; const bound = dump.outlineUpperBound; const over = dump.overThreshold;
+  return [
+    `tokenslim classify: ${n(report.files)} transcript file(s), ${n(report.results)} Bash result(s) classified${report.sinceDays === null ? '' : ` (last ${report.sinceDays} days)`}; ${n(report.imagesSkipped)} image result(s) skipped`,
+    `  Bash chars ${n(report.chars)}; cost-weighted chars ${n(report.weightedChars)} (chars x API calls after the result; ${n(report.apiCalls)} API calls seen)`,
+    '  buckets are exclusive, first match wins: fileDump, grep, pathList, testRunner, json, other; persisted results are their own bucket',
+    '',
+    render(headings), widths.map((width) => '-'.repeat(width)).join('  '), ...body.map(render),
+    '',
+    `fileDump by output lines: ${dump.bySize.map((s) => `${s.lines} ${n(s.count)} result(s) ${n(s.chars)} chars (${p(s.pctChars)})`).join('; ')}`,
+    `fileDump by form: ${dump.byForm.map((f) => `${f.form} ${n(f.count)}`).join(', ') || 'none'}`,
+    `fileDump over ${dump.threshold} lines: ${n(over.count)} result(s), ${n(over.chars)} chars = ${p(over.pctChars)} of Bash chars, ${p(over.pctWeighted)} of cost-weighted`,
+    `outline-first savings, upper bound (assumes no follow-up read): ${n(bound.savedChars)} chars = ${p(bound.pctOfBashChars)} of all Bash chars (${p(bound.pctOfWeighted)} cost-weighted), over ${n(bound.dumps)} dump(s) whose file the read guard may withhold; deny reasons total ${n(bound.outlineChars)} chars`,
+    ...(bound.notTextFile ? [`  not counted: ${n(bound.notTextFile)} dump(s), ${n(bound.notTextChars)} chars, of files outside the guard's text allowlist`] : []),
+    `WP4 go/no-go: fileDump over ${dump.threshold} lines = ${p(report.goNoGo.pct)} of Bash chars (threshold ${report.goNoGo.thresholdPct}%) → ${report.goNoGo.go ? 'GO' : 'NO-GO'}`,
+  ].join('\n');
+}
+
 const COST_NOTE = `cost-weighted = sum over compressed results of saved tokens x API calls after the result in the same session (tokens = chars/${CHARS_PER_TOKEN}); it is cache-read tokens avoided, so multiply by your cache-read price for dollars`;
 
 function capExemptLine(report) {
@@ -392,26 +499,31 @@ function usage() {
   return [
     'Usage: node scripts/benchmark.mjs [--format text|md]',
     '       node scripts/benchmark.mjs --transcripts <dir> [--since <days>] [--format text|json|md] [--config <path>] [--audit]',
+    '       node scripts/benchmark.mjs --transcripts <dir> --classify [--classify-lines <N>] [--since <days>] [--format text|json]',
   ].join('\n');
 }
 
 // Accepts `--flag value` and `--flag=value`; returns null on any unknown, repeated or incomplete argument.
 function parseArgs(args) {
-  const options = { format: 'text', transcripts: null, since: undefined, config: null, audit: false, help: false };
+  const options = { format: 'text', transcripts: null, since: undefined, config: null, audit: false, classify: false, classifyLines: undefined, help: false };
   const seen = new Set();
   for (let i = 0; i < args.length; i += 1) {
     const [flag, inline] = args[i].startsWith('--') && args[i].includes('=') ? [args[i].slice(0, args[i].indexOf('=')), args[i].slice(args[i].indexOf('=') + 1)] : [args[i], undefined];
     if (flag === '--help' && inline === undefined) { options.help = true; continue; }
     if (flag === '--audit' && inline === undefined && !seen.has(flag)) { seen.add(flag); options.audit = true; continue; }
-    if (!['--format', '--transcripts', '--since', '--config'].includes(flag) || seen.has(flag)) return null;
+    if (flag === '--classify' && inline === undefined && !seen.has(flag)) { seen.add(flag); options.classify = true; continue; }
+    if (!['--format', '--transcripts', '--since', '--config', '--classify-lines'].includes(flag) || seen.has(flag)) return null;
     seen.add(flag);
     const value = inline ?? args[++i];
     if (value === undefined || value === '') return null;
     if (flag === '--format') { if (!['text', 'json', 'md'].includes(value)) return null; options.format = value; }
+    else if (flag === '--classify-lines') { if (!/^\d+$/.test(value)) return null; options.classifyLines = Number(value); }
     else if (flag === '--since') { if (!/^\d+$/.test(value)) return null; options.since = Number(value); }
     else options[flag.slice(2)] = value;
   }
   if (options.help) return args.length === 1 ? options : null;
+  if (options.classify && (!options.transcripts || options.audit || seen.has('--config') || options.format === 'md')) return null;
+  if (seen.has('--classify-lines') && !options.classify) return null;
   if (!options.transcripts && (options.format === 'json' || seen.has('--since') || seen.has('--config') || options.audit)) return null;
   return options;
 }
@@ -424,6 +536,11 @@ function main(args) {
   }
   if (options.help) {
     process.stdout.write(`${usage()}\n`);
+    return 0;
+  }
+  if (options.transcripts && options.classify) {
+    const report = classifyTranscripts({ root: resolve(options.transcripts), sinceDays: options.since, lines: options.classifyLines });
+    process.stdout.write(`${options.format === 'json' ? JSON.stringify(report) : formatClassifyText(report)}\n`);
     return 0;
   }
   if (options.transcripts) {
