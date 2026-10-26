@@ -9,7 +9,7 @@ import { chmodSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSy
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { updateHistory } from './history.mjs';
+import { BASH_GUARD_KEYS, updateHistory } from './history.mjs';
 import { commandFamily } from './privacy.mjs';
 
 const CHARS_PER_TOKEN = 3; // rough heuristic for code/log text (~3 chars/token)
@@ -73,10 +73,9 @@ function secureWriteState(sessionId, state) {
   }
 }
 
-export function saveState(sessionId, state) {
+// History receives only new events, rather than this cumulative ledger.
+function flushHistory(sessionId, state) {
   try {
-    secureWriteState(sessionId, state);
-    // History receives only new savings events, rather than this cumulative ledger.
     const events = Array.isArray(state?.historyEvents) ? state.historyEvents : [];
     if (events.length && updateHistory(events)) {
       delete state.historyEvents;
@@ -85,6 +84,16 @@ export function saveState(sessionId, state) {
   } catch {
     // best-effort only; never throw
   }
+}
+
+export function saveState(sessionId, state) {
+  try {
+    secureWriteState(sessionId, state);
+  } catch {
+    // best-effort only; never throw
+    return;
+  }
+  flushHistory(sessionId, state);
 }
 
 export function recordSavings(state, { tool, bytesIn, bytesOut, command, cwd }) {
@@ -125,6 +134,24 @@ export function recordRecovery(state, outcome) {
   recordDiagnostic(state, { tool: 'Bash', event: 'recovery', outcome });
   if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
   state.historyEvents.push({ kind: 'recovery', outcome: String(outcome) });
+  return state;
+}
+
+// Bash dump guard counters, in the ledger (state.bashGuard) and as a daily history event. Counts and byte sums only:
+// never a command, a path or a file name. `deltas` keys are BASH_GUARD_KEYS.
+export function recordBashGuard(state, deltas) {
+  if (!state || typeof state !== 'object') return state;
+  const counters = state.bashGuard && typeof state.bashGuard === 'object' ? state.bashGuard : {};
+  const event = { kind: 'bashGuard' };
+  for (const key of BASH_GUARD_KEYS) {
+    const value = Number(deltas?.[key]) || 0;
+    if (value <= 0) continue;
+    counters[key] = (Number(counters[key]) || 0) + value;
+    event[key] = value;
+  }
+  state.bashGuard = counters;
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push(event);
   return state;
 }
 
@@ -206,21 +233,26 @@ const GUARD_DENIED_MAX = 200;
 // 'allow' when a deny is already pending (entry consumed, so a later third Read starts a new deny cycle),
 // and 'error' when a first deny could not be recorded: the caller must then stay silent, because a deny
 // that cannot be followed by an allowed repeat would block the Read for good.
-export function consumeGuardDeny(sessionId, key) {
+// `record(state, verdict)` lets a guard add its counters to the same load/save (and flush them to history).
+export function consumeGuardDeny(sessionId, key, record) {
   try {
     const state = loadState(sessionId);
     const denied = state.guardDenied && typeof state.guardDenied === 'object' ? state.guardDenied : {};
     if (Object.hasOwn(denied, key)) {
       delete denied[key];
       state.guardDenied = denied;
+      try { record?.(state, 'allow'); } catch { /* counters are best-effort */ }
       try { secureWriteState(sessionId, state); } catch { /* a stale entry only delays the next deny cycle */ }
+      flushHistory(sessionId, state);
       return 'allow';
     }
     denied[key] = Date.now();
     const keys = Object.keys(denied);
     for (const old of keys.slice(0, Math.max(0, keys.length - GUARD_DENIED_MAX))) delete denied[old];
     state.guardDenied = denied;
+    try { record?.(state, 'deny'); } catch { /* counters are best-effort */ }
     secureWriteState(sessionId, state);
+    flushHistory(sessionId, state);
     return 'deny';
   } catch {
     return 'error';

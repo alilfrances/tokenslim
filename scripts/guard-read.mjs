@@ -1,44 +1,22 @@
 #!/usr/bin/env node
 // PreToolUse guard for large unbounded Read calls.
 
-import { existsSync, statSync, openSync, readSync, closeSync, readFileSync as readStdinSync } from 'node:fs';
+import { existsSync, statSync, readFileSync as readStdinSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { detectRuntime, preToolUseAdditionalContextOutput, preToolUseDenyOutput } from './lib/hook-output.mjs';
 import { loadConfig } from './lib/config.mjs';
 import { isTextLikePath, outlineFile } from './lib/outline.mjs';
 import { consumeGuardDeny } from './lib/state.mjs';
+import { countLinesCapped } from './lib/line-count.mjs';
+import { CHARS_PER_TOKEN, guardDenyReason } from './lib/guard-reason.mjs';
 
 const DEFAULT_THRESHOLD = 2000;
-const CHARS_PER_TOKEN = 3;
-const COUNT_BYTE_CAP = 5 * 1024 * 1024;
 
 function isDisabled(config) {
   const flags = Array.isArray(config?.disable) ? config.disable : [];
   const normalized = flags.map((flag) => String(flag).trim().toLowerCase());
   return normalized.includes('readguard') || normalized.includes('all');
-}
-
-// Count incrementally so a PreToolUse hook never materializes a giant artifact.
-// `capped` means this is a lower bound, not an exact line count.
-function countLinesCapped(filePath, size) {
-  const limit = Math.min(size, COUNT_BYTE_CAP);
-  const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, Math.max(1, limit)));
-  let position = 0;
-  let newlines = 0;
-  let fd;
-  try {
-    fd = openSync(filePath, 'r');
-    while (position < limit) {
-      const read = readSync(fd, buffer, 0, Math.min(buffer.length, limit - position), position);
-      if (!read) break;
-      for (let i = 0; i < read; i += 1) if (buffer[i] === 10) newlines += 1;
-      position += read;
-    }
-  } finally {
-    if (fd !== undefined) closeSync(fd);
-  }
-  return { lines: newlines + 1, capped: size > position };
 }
 
 function hasBounds(input) {
@@ -59,16 +37,8 @@ function denyOrAllow(payload, filePath, size, lineInfo) {
   } catch {
     // unreadable now: still deny with the size line; the repeat Read will surface the real error
   }
-  const lines = lineInfo.capped ? `>${lineInfo.lines}` : String(outline && !outline.partial ? outline.totalLines : lineInfo.lines);
-  const kb = Math.max(1, Math.round(size / 1024));
-  const parts = [`[tokenslim] ${filePath} is ${lines} lines, ${kb} KB (~${Math.round(size / CHARS_PER_TOKEN)} tokens); the full Read was held back.`];
-  if (outline && outline.entries.length) {
-    parts.push('Outline:', ...outline.entries);
-    if (outline.more) parts.push(`… ${outline.more} more`);
-    if (outline.partial) parts.push('(outline covers the first 1MB only)');
-  }
-  parts.push('Re-read with offset/limit for the section you need. Repeating this exact Read will return the full file.');
-  process.stdout.write(JSON.stringify(preToolUseDenyOutput(payload, parts.join('\n'))));
+  const reason = guardDenyReason({ filePath, size, lineInfo, outline });
+  process.stdout.write(JSON.stringify(preToolUseDenyOutput(payload, reason)));
   return true;
 }
 

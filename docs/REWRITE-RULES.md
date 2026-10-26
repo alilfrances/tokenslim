@@ -4,8 +4,16 @@
 flags on the original binary; it never proxies or replaces that binary. No rewrite emits
 no hook output.
 
-**Rewrites are off by default since 0.4.0.** With the default config the hook exits
-immediately: no output, no tokenizing, no state written.
+The same `PreToolUse` Bash hook also hosts the whole-file-dump guard (`bashGuard`, see the README):
+it runs first, before the rewrite opt-in check, so it is active (in `shadow` mode: observe and count,
+never output) even while rewrites are off. It only acts on commands containing `cat`, `nl`, `sed`,
+`head` or `tail`; every other command returns before any file or state access. In `deny` mode a
+refused dump ends the hook without reaching the rewrite rules; `disable: ["rewrite"]` does not
+disable the guard and `disable: ["bashguard"]` does not disable rewrites (`all` disables both).
+
+**Rewrites are off by default since 0.4.0.** With the default config the rewrite part of the hook
+exits immediately: no rewrite output, no tokenizing. The only state it can write is the guard's
+shadow counters, and only when a command is a whole-file dump over the threshold.
 
 > **Security warning.** An applied rewrite returns `permissionDecision: "allow"`, which
 > auto-approves the rewritten command and bypasses Claude Code's permission prompt for it.

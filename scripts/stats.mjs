@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { historyPath, loadHistory } from './lib/history.mjs';
+import { BASH_GUARD_KEYS, historyPath, loadHistory } from './lib/history.mjs';
 
 const cacheDir = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'tokenslim');
 const args = process.argv.slice(2);
@@ -38,6 +38,21 @@ function dayAllowed(day) {
 }
 const RECOVERY_KEYS = ['capped', 'teeRead', 'teeCat', 'rerun'];
 const RECOVERY_WARN_RATE = 0.15;
+const GUARD_WARN_RATE = 0.3;
+const GUARD_CSV_KEYS = ['wouldDeny', 'wouldDenyBytes', 'denied', 'repeated', 'skippedRuntime'];
+// Bash dump guard counters as a report object, or null when none were recorded (so older data renders unchanged).
+// `attemptedBash` is the Bash bytes that reached a hook's size check, the denominator for the shadow estimate.
+function bashGuardFrom(counters, attemptedBash = 0) {
+  const c = Object.fromEntries(BASH_GUARD_KEYS.map((key) => [key, n(counters?.[key])]));
+  if (!BASH_GUARD_KEYS.some((key) => c[key] > 0)) return null;
+  const { le800, le2000, gt2000, ...totals } = c;
+  return {
+    ...totals, buckets: { le800, le2000, gt2000 },
+    pctOfAttemptedBash: totals.wouldDenyBytes > 0 && attemptedBash > 0 ? pct(totals.wouldDenyBytes, attemptedBash) : null,
+    repeatRate: totals.denied > 0 ? totals.repeated / totals.denied : null,
+    repeatWarn: totals.denied > 0 && totals.repeated / totals.denied > GUARD_WARN_RATE,
+  };
+}
 function emptyRow() { return { bytesIn: 0, bytesOut: 0, events: 0, bytesAttempted: 0, savedCovered: 0 }; }
 // savedCovered counts savings only where attempted bytes were also recorded, so history that mixes versions
 // from before and after bytesAttempted existed cannot inflate "% of attempted".
@@ -57,6 +72,8 @@ function historyReport(history) {
   const commands = {};
   const days = [];
   const recovery = {};
+  const guard = {};
+  let attemptedBash = 0;
   let totalCovered = 0;
   for (const [day, record] of Object.entries(history.days || {}).sort(([a], [b]) => a.localeCompare(b))) {
     if (!dayAllowed(day)) continue;
@@ -65,11 +82,14 @@ function historyReport(history) {
     for (const [name, item] of Object.entries(bucket)) { addRow(rows[name] ||= emptyRow(), item); addRow(dayTotal, item); }
     for (const [name, item] of Object.entries(record.byCommand || {})) add(commands[name] ||= { bytesIn: 0, bytesOut: 0, events: 0 }, item);
     for (const key of RECOVERY_KEYS) recovery[key] = n(recovery[key]) + n(record.recovery?.[key]);
+    for (const key of BASH_GUARD_KEYS) guard[key] = n(guard[key]) + n(record.bashGuard?.[key]);
+    attemptedBash += n(record.byTool?.Bash?.bytesAttempted);
     if (dayTotal.bytesAttempted > 0) totalCovered += saved(dayTotal);
-    days.push({ day, bytesIn: dayTotal.bytesIn, bytesOut: dayTotal.bytesOut, events: dayTotal.events, bytesSaved: saved(dayTotal), bytesAttempted: dayTotal.bytesAttempted, recovery: project ? null : recoveryFrom(record.recovery) });
+    const dayGuard = project ? null : bashGuardFrom(record.bashGuard, n(record.byTool?.Bash?.bytesAttempted));
+    days.push({ day, bytesIn: dayTotal.bytesIn, bytesOut: dayTotal.bytesOut, events: dayTotal.events, bytesSaved: saved(dayTotal), bytesAttempted: dayTotal.bytesAttempted, recovery: project ? null : recoveryFrom(record.recovery), ...(dayGuard ? { bashGuard: dayGuard } : {}) });
   }
-  // Recovery counters are daily and global; they cannot be attributed to a project.
-  return reportObject(rows, commands, days, 'history', totalCovered, project ? null : recoveryFrom(recovery));
+  // Recovery and guard counters are daily and global; they cannot be attributed to a project.
+  return reportObject(rows, commands, days, 'history', totalCovered, project ? null : recoveryFrom(recovery), project ? null : bashGuardFrom(guard, attemptedBash));
 }
 function ledgerReport() {
   const path = positional ? join(cacheDir, `${positional.replace(/[^A-Za-z0-9_-]/g, '')}.json`) : latestLedger();
@@ -88,12 +108,12 @@ function ledgerReport() {
     for (const item of Object.values(rows)) if (n(item.bytesAttempted) > 0) covered += saved(item);
     // Edit savings (Read dedup after an Edit) are part of Read's attempted bytes.
     if (rows.Edit && !n(rows.Edit.bytesAttempted) && n(rows.Read?.bytesAttempted) > 0) covered += saved(rows.Edit);
-    const base = reportObject(Object.fromEntries(Object.entries(rows).map(([t, i]) => [t, { ...i, savedCovered: n(i.bytesAttempted) > 0 ? saved(i) : 0 }])), {}, [], 'ledger', covered, recoveryFrom(state.diagnostics?.Bash?.recovery));
+    const base = reportObject(Object.fromEntries(Object.entries(rows).map(([t, i]) => [t, { ...i, savedCovered: n(i.bytesAttempted) > 0 ? saved(i) : 0 }])), {}, [], 'ledger', covered, recoveryFrom(state.diagnostics?.Bash?.recovery), bashGuardFrom(state.bashGuard, n(state.attempted?.Bash?.bytes)));
     return { ...base, diagnostics: state.diagnostics || {} };
   } catch { return null; }
 }
 function pct(covered, attempted) { return n(attempted) > 0 ? Math.round(n(covered) / n(attempted) * 1000) / 10 : null; }
-function reportObject(rows, commands, days, source, totalCovered = 0, recovery = null) {
+function reportObject(rows, commands, days, source, totalCovered = 0, recovery = null, bashGuard = null) {
   const total = { bytesIn: 0, bytesOut: 0, events: 0 };
   let attempted = 0;
   for (const item of Object.values(rows)) { add(total, item); attempted += n(item.bytesAttempted); }
@@ -104,9 +124,24 @@ function reportObject(rows, commands, days, source, totalCovered = 0, recovery =
     source, period, project,
     total: { ...total, bytesSaved: saved(total), estTokensSaved: Math.max(0, Math.round(saved(total) / 3)), bytesAttempted: attempted, pctOfAttempted: pct(totalCovered, attempted) },
     byTool, byCommand: decorate(commands), days, recovery,
+    ...(bashGuard ? { bashGuard } : {}),
   };
 }
 function fmt(b) { return b >= 1048576 ? `${(b / 1048576).toFixed(1)}MB` : b >= 1024 ? `${(b / 1024).toFixed(1)}KB` : `${b}B`; }
+function guardLines(g) {
+  const lines = [];
+  if (g.wouldDeny > 0) {
+    const share = g.pctOfAttemptedBash !== null ? `; ≈${g.pctOfAttemptedBash}% of attempted Bash bytes` : '';
+    lines.push(`bash dump guard (shadow): ${g.wouldDeny} whole-file dump(s) would be outlined, ${fmt(g.wouldDenyBytes)} of files${share}`);
+    lines.push(`  by total lines: ≤800 ${g.buckets.le800}, 801-2000 ${g.buckets.le2000}, >2000 ${g.buckets.gt2000}`);
+    lines.push('  set bashGuard.mode to "deny" to try it; watch the repeat rate');
+  }
+  if (g.denied > 0) {
+    const skipped = g.skippedRuntime > 0 ? `, skipped ${g.skippedRuntime} (no Claude session)` : '';
+    lines.push(`bash dump guard: denied ${g.denied}, repeated ${g.repeated} (${Math.round(g.repeatRate * 100)}%)${g.repeatWarn ? ` ⚠ above ${Math.round(GUARD_WARN_RATE * 100)}%: the outline was often not enough` : ''}${skipped}`);
+  }
+  return lines;
+}
 function text(report) {
   const title = report.source === 'history' ? `tokenslim savings (${period}${project ? `, project: ${project}` : ''}):` : 'tokenslim savings (this session):';
   const out = [title];
@@ -119,6 +154,7 @@ function text(report) {
     const recovered = r.teeRead + r.teeCat + r.rerun;
     out.push(`bash cap recovery rate: ${Math.round(r.rate * 100)}% (${recovered} of ${r.capped} capped; teeRead ${r.teeRead}, teeCat ${r.teeCat}, rerun ${r.rerun})${r.warn ? ` ⚠ above ${Math.round(RECOVERY_WARN_RATE * 100)}%: the cap may be hiding output the model needs` : ''}`);
   }
+  if (report.bashGuard) out.push(...guardLines(report.bashGuard));
   out.push('note: "% of attempted" counts every Bash/Read/Grep/MCP result that reached its size check (images excluded); cost-weighted savings come from `node scripts/benchmark.mjs --transcripts <dir>`.');
   if (top) {
     const entries = Object.entries(report.byCommand).sort(([, a], [, b]) => b.bytesSaved - a.bytesSaved).slice(0, 10);
@@ -140,10 +176,11 @@ function text(report) {
   return out.join('\n');
 }
 function csv(report) {
-  // Columns are only appended when there is attempted/recovery data, so older data keeps the original header.
-  const extra = report.days.some((d) => n(d.bytesAttempted) > 0 || (d.recovery && RECOVERY_KEYS.some((key) => n(d.recovery[key]) > 0)));
-  const lines = [`day,bytesIn,bytesOut,bytesSaved,events${extra ? `,bytesAttempted,${RECOVERY_KEYS.join(',')}` : ''}`];
-  for (const d of report.days) lines.push(`${d.day},${d.bytesIn},${d.bytesOut},${d.bytesSaved},${d.events}${extra ? `,${n(d.bytesAttempted)},${RECOVERY_KEYS.map((key) => n(d.recovery?.[key])).join(',')}` : ''}`);
+  // Columns are only appended when there is attempted/recovery/guard data, so older data keeps the original header.
+  const guard = report.days.some((d) => d.bashGuard);
+  const extra = guard || report.days.some((d) => n(d.bytesAttempted) > 0 || (d.recovery && RECOVERY_KEYS.some((key) => n(d.recovery[key]) > 0)));
+  const lines = [`day,bytesIn,bytesOut,bytesSaved,events${extra ? `,bytesAttempted,${RECOVERY_KEYS.join(',')}` : ''}${guard ? `,${GUARD_CSV_KEYS.join(',')}` : ''}`];
+  for (const d of report.days) lines.push(`${d.day},${d.bytesIn},${d.bytesOut},${d.bytesSaved},${d.events}${extra ? `,${n(d.bytesAttempted)},${RECOVERY_KEYS.map((key) => n(d.recovery?.[key])).join(',')}` : ''}${guard ? `,${GUARD_CSV_KEYS.map((key) => n(d.bashGuard?.[key])).join(',')}` : ''}`);
   return lines.join('\n');
 }
 
