@@ -36,6 +36,7 @@ function add(bucket, item) {
   bucket.bytesOut = number(bucket.bytesOut) + number(item.bytesOut);
   bucket.events = number(bucket.events) + number(item.events || 1);
 }
+const RECOVERY_OUTCOMES = ['capped', 'teeRead', 'teeCat', 'rerun'];
 function dayKey(date) { return date.toISOString().slice(0, 10); }
 function prune(history, today) {
   const cutoff = new Date(today);
@@ -52,6 +53,22 @@ export function updateHistory(events, now = new Date()) {
     const day = dayKey(now);
     const record = history.days[day] ||= { byTool: {}, byCommand: {}, byProject: {} };
     for (const event of events) {
+      // Attempted bytes are a denominator only: they must not add to savings events or byCommand.
+      if (event?.kind === 'attempted') {
+        const bytes = number(event.bytes);
+        const project = String(event.cwd || process.cwd());
+        for (const bucket of [record.byTool[String(event.tool || 'unknown')] ||= {}, record.byProject[project] ||= {}]) {
+          bucket.bytesAttempted = number(bucket.bytesAttempted) + bytes;
+        }
+        continue;
+      }
+      if (event?.kind === 'recovery') {
+        if (RECOVERY_OUTCOMES.includes(event.outcome)) {
+          const counters = record.recovery ||= {};
+          counters[event.outcome] = number(counters[event.outcome]) + 1;
+        }
+        continue;
+      }
       const item = { bytesIn: number(event.bytesIn), bytesOut: number(event.bytesOut), events: number(event.events) || 1 };
       const tool = String(event.tool || 'unknown');
       const command = commandFamily(event.command || tool);

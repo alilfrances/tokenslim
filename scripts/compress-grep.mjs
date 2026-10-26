@@ -13,7 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
-import { loadState, saveState, recordDiagnostic, recordSavings } from './lib/state.mjs';
+import { loadState, saveState, recordAttempted, recordDiagnostic, recordSavings } from './lib/state.mjs';
 import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
 import { loadConfig } from './lib/config.mjs';
 
@@ -29,17 +29,6 @@ function eventName(payload) {
 
 function diagnosticTool(payload) {
   return payload?.tool_name === 'Glob' ? 'Glob' : 'Grep';
-}
-
-function recordDiagnosticBestEffort(payload, outcome) {
-  const sessionId = payload && payload.session_id;
-  try {
-    const state = loadState(sessionId);
-    recordDiagnostic(state, { tool: diagnosticTool(payload), event: eventName(payload), outcome });
-    saveState(sessionId, state);
-  } catch {
-    // best-effort diagnostics only
-  }
 }
 
 function passThrough(payload) {
@@ -175,17 +164,10 @@ function groupFilenames(filenames) {
   });
 }
 
-function recordAndEmit(payload, updatedToolOutput, bytesIn, bytesOut) {
-  const sessionId = payload && payload.session_id;
-  try {
-    const state = loadState(sessionId);
-    recordDiagnostic(state, { tool: diagnosticTool(payload), event: eventName(payload), outcome: 'compressed' });
-    // Both Grep and Glob roll up under a single "Grep" ledger bucket per spec.
-    recordSavings(state, { tool: 'Grep', bytesIn, bytesOut, command: payload?.tool_name || 'Grep', cwd: payload?.cwd });
-    saveState(sessionId, state);
-  } catch {
-    // ledger is best-effort; never block the compressed output
-  }
+function recordAndEmit(payload, ledger, updatedToolOutput, bytesIn, bytesOut) {
+  ledger.note('compressed');
+  // Both Grep and Glob roll up under a single "Grep" ledger bucket per spec.
+  recordSavings(ledger.state, { tool: 'Grep', bytesIn, bytesOut, command: payload?.tool_name || 'Grep', cwd: payload?.cwd });
   process.stdout.write(
     JSON.stringify(postToolUseOutput(payload, updatedToolOutput))
   );
@@ -193,14 +175,15 @@ function recordAndEmit(payload, updatedToolOutput, bytesIn, bytesOut) {
 
 // Glob: no text field, so it's handled separately from the locateText/content path.
 // Returns true if it handled (emitted or intentionally passed through) the response.
-function tryHandleGlob(payload, toolResponse, config) {
+function tryHandleGlob(payload, ledger, toolResponse, config) {
   if (!toolResponse || typeof toolResponse !== 'object' || !Array.isArray(toolResponse.filenames)) {
     return false;
   }
   const filenames = toolResponse.filenames;
   const origSerialized = JSON.stringify(filenames);
+  ledger.attempted(origSerialized.length);
   if (origSerialized.length < config.minChars || filenames.length <= 100) {
-    recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    ledger.note('skippedBelowThreshold');
     passThrough(payload);
     return true; // recognized, nothing to do
   }
@@ -209,16 +192,18 @@ function tryHandleGlob(payload, toolResponse, config) {
   const newSerialized = JSON.stringify(grouped);
   const ratio = (origSerialized.length - newSerialized.length) / origSerialized.length;
   if (ratio < 0.1) {
-    recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    ledger.note('skippedPoorRatio');
     passThrough(payload);
     return true;
   }
 
   const updatedToolOutput = { ...toolResponse, filenames: grouped };
-  recordAndEmit(payload, updatedToolOutput, origSerialized.length, newSerialized.length);
+  recordAndEmit(payload, ledger, updatedToolOutput, origSerialized.length, newSerialized.length);
   return true;
 }
 
+// One ledger load and save per invocation, flushed in `finally` so a fail-open exception keeps what was recorded.
+// Grep and Glob share the "Grep" bucket for attempted bytes, as they do for savings.
 function main(input) {
   let payload;
   try {
@@ -227,41 +212,57 @@ function main(input) {
     return;
   }
   const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  const sessionId = payload && payload.session_id;
+  const state = loadState(sessionId);
+  const ledger = {
+    state,
+    note: (outcome) => recordDiagnostic(state, { tool: diagnosticTool(payload), event: eventName(payload), outcome }),
+    attempted: (bytes) => recordAttempted(state, { tool: 'Grep', bytes, cwd: payload?.cwd }),
+  };
+  try {
+    run(payload, config, ledger);
+  } finally {
+    saveState(sessionId, state);
+  }
+}
+
+function run(payload, config, ledger) {
   if (isDisabled(config)) {
-    recordDiagnosticBestEffort(payload, 'disabled');
+    ledger.note('disabled');
     passThrough(payload);
     return;
   }
-  recordDiagnosticBestEffort(payload, 'attempted');
+  ledger.note('attempted');
 
   const toolResponse = payload && payload.tool_response;
   const toolName = payload && payload.tool_name;
   if (!toolResponse) {
-    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    ledger.note('unsupportedShape');
     passThrough(payload);
     return;
   }
 
   if (toolName === 'Glob') {
-    tryHandleGlob(payload, toolResponse, config);
+    tryHandleGlob(payload, ledger, toolResponse, config);
     return;
   }
 
   const locator = locateText(toolResponse);
   if (!locator) {
-    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    ledger.note('unsupportedShape');
     passThrough(payload);
     return;
   }
 
   const text = locator.get();
   if (typeof text !== 'string') {
-    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    ledger.note('unsupportedShape');
     passThrough(payload);
     return;
   }
+  ledger.attempted(text.length);
   if (text.length < config.minChars) {
-    recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    ledger.note('skippedBelowThreshold');
     passThrough(payload);
     return;
   }
@@ -271,13 +272,13 @@ function main(input) {
   const saved = text.length - compressed.length;
   const ratio = text.length > 0 ? saved / text.length : 0;
   if (ratio < 0.1) {
-    recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    ledger.note('skippedPoorRatio');
     passThrough(payload);
     return;
   }
 
   const updatedToolOutput = locator.set(compressed);
-  recordAndEmit(payload, updatedToolOutput, text.length, compressed.length);
+  recordAndEmit(payload, ledger, updatedToolOutput, text.length, compressed.length);
 }
 
 try {

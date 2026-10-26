@@ -6,6 +6,7 @@
 // best-effort. Writes themselves are atomic (temp file + rename), never torn JSON.
 
 import { chmodSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { updateHistory } from './history.mjs';
@@ -99,6 +100,45 @@ export function recordSavings(state, { tool, bytesIn, bytesOut, command, cwd }) 
   if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
   state.historyEvents.push({ tool: key, bytesIn, bytesOut, command: commandFamily(command || key), cwd });
   return state;
+}
+
+// Bytes of tool results that reached a hook's size check, whether or not they were compressed: the honest
+// denominator for "% of attempted". Images are never passed in. Kept apart from savings so it never bumps their events.
+export function recordAttempted(state, { tool, bytes, cwd }) {
+  if (!state || typeof state !== 'object') return state;
+  if (!state.attempted || typeof state.attempted !== 'object') state.attempted = {};
+  const key = String(tool ?? 'unknown');
+  const size = Number(bytes) || 0;
+  const entry = state.attempted[key] || { events: 0, bytes: 0 };
+  entry.events = (Number(entry.events) || 0) + 1;
+  entry.bytes = (Number(entry.bytes) || 0) + size;
+  state.attempted[key] = entry;
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push({ kind: 'attempted', tool: key, bytes: size, cwd });
+  return state;
+}
+
+// Recovery signals for the Bash cap: capped, teeRead, teeCat, rerun. Counted in the ledger diagnostics and as a compact
+// daily counter in history, so the recovery rate survives past one session.
+export function recordRecovery(state, outcome) {
+  if (!state || typeof state !== 'object') return state;
+  recordDiagnostic(state, { tool: 'Bash', event: 'recovery', outcome });
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push({ kind: 'recovery', outcome: String(outcome) });
+  return state;
+}
+
+const RECENT_BASH = 3;
+
+// Remembers the last few Bash commands as hashes only (never command text) and reports whether this one repeats a
+// command whose output was capped, i.e. the model probably re-ran it to get what the cap hid.
+export function noteBashCommand(state, command, capped) {
+  if (!state || typeof state !== 'object' || typeof command !== 'string' || !command) return false;
+  const ring = Array.isArray(state.recentBash) ? state.recentBash : [];
+  const h = createHash('sha256').update(command, 'utf8').digest('hex').slice(0, 16);
+  const rerun = ring.some((entry) => entry && entry.h === h && entry.capped === true);
+  state.recentBash = [...ring, { h, capped: Boolean(capped) }].slice(-RECENT_BASH);
+  return rerun;
 }
 
 export function recordDiagnostic(state, { tool, event, outcome }) {

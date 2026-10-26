@@ -1,7 +1,7 @@
 // Best-effort recovery copies for output where compression drops information.
 import { chmodSync, closeSync, constants, fchmodSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 const DEFAULT_MIN_BYTES = 4096;
 // Pruning deletes the oldest file a marker may still point to, so keep enough history for a long session.
@@ -15,13 +15,24 @@ function stableId(value) {
   return id ? encodeURIComponent(id).replace(/\./g, '%2E') : null;
 }
 
+export function teeRoot(env = process.env) {
+  const home = env.HOME || homedir();
+  const cacheHome = env.XDG_CACHE_HOME || join(home, '.cache');
+  return join(cacheHome, 'tokenslim', 'tee');
+}
+
 export function teePath(sessionId, toolUseId, env = process.env) {
   const session = stableId(sessionId);
   const toolUse = stableId(toolUseId);
   if (!session || !toolUse) return null;
-  const home = env.HOME || homedir();
-  const cacheHome = env.XDG_CACHE_HOME || join(home, '.cache');
-  return join(cacheHome, 'tokenslim', 'tee', session, `${toolUse}.log`);
+  return join(teeRoot(env), session, `${toolUse}.log`);
+}
+
+// True when a file path lies inside the tee root (a recovery read). Pure string check; touches no files.
+export function isTeePath(filePath, env = process.env) {
+  if (typeof filePath !== 'string' || !filePath) return false;
+  // resolve() collapses `..`, so a path that merely starts with the root cannot escape it.
+  return resolve(filePath).startsWith(resolve(teeRoot(env)) + sep);
 }
 
 export function teeMinBytes(env = process.env) {
