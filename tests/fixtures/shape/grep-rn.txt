@@ -1,0 +1,56 @@
+scripts/lib/pipeline.mjs:209:function compressFrames(traceLines) {
+scripts/lib/pipeline.mjs:282:    output.push(...compressFrames(item.lines));
+scripts/lib/pipeline.mjs:318:export function compressBashOutput(text, opts = {}) {
+scripts/lib/tee.mjs:1:// Best-effort recovery copies for output where compression drops information.
+scripts/lib/tee.mjs:49:// Never throw: recovery is optional and must not affect compression availability.
+scripts/lib/hook-output.mjs:42:  const label = `[tokenslim: compressed ${name} output]`;
+scripts/lib/read-format.mjs:53:// compress-read requires hashing the raw on-disk content, no line-number formatting.
+scripts/lib/bash-hook.mjs:2:// the parity test all run the same code. The wrapper (compress-bash.mjs) owns the ledger and the JSON output.
+scripts/lib/bash-hook.mjs:3:import { compressBashOutput, stripAnsi, stripProgressNoise } from './pipeline.mjs';
+scripts/lib/bash-hook.mjs:4:import { commandMeta, compressCommandOutput } from './cmd-compressors/index.mjs';
+scripts/lib/bash-hook.mjs:5:import { compressShapeOutput } from './shape-compressors/index.mjs';
+scripts/lib/bash-hook.mjs:6:import { FAILURE_RE } from './cmd-compressors/shared.mjs';
+scripts/lib/bash-hook.mjs:30:  // Linter diagnostics have a purpose-built, location-preserving compressor. Their
+scripts/lib/bash-hook.mjs:37:function compressStderr(text) {
+scripts/lib/bash-hook.mjs:51:function compressed(text, command, config, extra) {
+scripts/lib/bash-hook.mjs:52:  const specialized = compressCommandOutput(text, command, config, extra);
+scripts/lib/bash-hook.mjs:61:  const shaped = compressShapeOutput(text);
+scripts/lib/bash-hook.mjs:63:    const generic = compressBashOutput(shaped.text);
+scripts/lib/bash-hook.mjs:76:  return compressBashOutput(text);
+scripts/lib/bash-hook.mjs:87:  const rules = [...new Set(rulesApplied || [])].join(', ') || 'compressed';
+scripts/lib/bash-hook.mjs:96: * skippedPoorRatio, compressed. bytesOut is what would be emitted (tee marker included); pass-through
+scripts/lib/bash-hook.mjs:113:  // risk changing it; successful commands still receive command-aware compression.
+scripts/lib/bash-hook.mjs:117:  const compressedStdout = compressed(stdout, command, config, { stderr });
+scripts/lib/bash-hook.mjs:119:  // or generic lossy compressor over it: remove ANSI/progress noise only.
+scripts/lib/bash-hook.mjs:120:  const compressedStderr = compressStderr(stderr);
+scripts/lib/bash-hook.mjs:121:  const markedStdout = compressedStdout.text !== stdout
+scripts/lib/bash-hook.mjs:122:    ? markCompression(compressedStdout.text, compressedStdout.stats.rulesApplied)
+scripts/lib/bash-hook.mjs:123:    : compressedStdout.text;
+scripts/lib/bash-hook.mjs:124:  const markedStderr = compressedStderr.text !== stderr
+scripts/lib/bash-hook.mjs:125:    ? markCompression(compressedStderr.text, compressedStderr.stats.rulesApplied)
+scripts/lib/bash-hook.mjs:126:    : compressedStderr.text;
+scripts/lib/bash-hook.mjs:127:  const bytesIn = compressedStdout.stats.bytesIn + compressedStderr.stats.bytesIn;
+scripts/lib/bash-hook.mjs:137:    lossy: isLossy(stdout, compressedStdout) || isLossy(stderr, compressedStderr),
+scripts/lib/bash-hook.mjs:155:  const rulesApplied = [...new Set([...(compressedStdout.stats.rulesApplied || []), ...compressedStderr.stats.rulesApplied])];
+scripts/lib/bash-hook.mjs:156:  return { outcome: 'compressed', updatedToolOutput, bytesIn, bytesOut: emittedBytesOut, rulesApplied, recoveryPath: recoveryPath || null };
+scripts/lib/transcripts.mjs:8:// A compressed result ends with our marker on its own line (or a tee `full:` marker). Matching only the final line keeps
+scripts/lib/transcripts.mjs:9:// tool output that merely quotes "[tokenslim:" mid-text (e.g. reading this repo's source) counted as uncompressed.
+scripts/lib/transcripts.mjs:11:// Known limitation: a Bash tool_result in the transcript merges stdout and stderr, so compressed stdout followed by
+scripts/lib/shape-compressors/grep.mjs:108:export function compress(text) {
+scripts/lib/shape-compressors/index.mjs:3:// Shape compressors recognize output by its text alone, never by the command that produced it, so pipes,
+scripts/lib/shape-compressors/index.mjs:7:export function compressShapeOutput(text) {
+scripts/lib/shape-compressors/index.mjs:8:  for (const compressor of COMPRESSORS) {
+scripts/lib/shape-compressors/index.mjs:9:    const compressed = compressor.compress(text);
+scripts/lib/shape-compressors/index.mjs:10:    if (compressed) return compressed;
+scripts/lib/cmd-compressors/shared.mjs:4:// `0 failed` summary and prose mentioning "error" must not close the compression
+scripts/lib/cmd-compressors/containers.mjs:9:export function compress(text, meta = {}) {
+scripts/lib/cmd-compressors/linters.mjs:23:export function compress(text, meta = {}) {
+scripts/lib/cmd-compressors/test-runners.mjs:20:export function compress(text, meta = {}) {
+scripts/lib/cmd-compressors/package-managers.mjs:19:export function compress(text, meta = {}) {
+scripts/lib/cmd-compressors/index.mjs:34:// package launchers so a command's output reaches the matching compressor.
+scripts/lib/cmd-compressors/index.mjs:107:export function compressCommandOutput(text, command, config = {}, extra = {}) {
+scripts/lib/cmd-compressors/index.mjs:112:  for (const compressor of COMPRESSORS) {
+scripts/lib/cmd-compressors/index.mjs:113:    const compressed = compressor.compress(text, meta);
+scripts/lib/cmd-compressors/index.mjs:114:    if (compressed) return compressed;
+scripts/lib/cmd-compressors/git.mjs:69:export function compress(text, meta = {}) {
+scripts/lib/cmd-compressors/git.mjs:74:  // These commands can emit hook, merge, or remote summaries. Generic compression

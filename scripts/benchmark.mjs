@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { compressBashOutput } from './lib/pipeline.mjs';
 import { compressCommandOutput } from './lib/cmd-compressors/index.mjs';
+import { compressShapeOutput } from './lib/shape-compressors/index.mjs';
 import { loadConfig, loadConfigLayerFile, mergeConfigLayer } from './lib/config.mjs';
 import { processBashPayload } from './lib/bash-hook.mjs';
 import { commandFamily } from './lib/privacy.mjs';
@@ -50,7 +51,7 @@ function displayReduction(value) {
   return `${Math.max(0, value).toFixed(1)}%`;
 }
 
-/** Run the same command-aware dispatch then generic fallback used by Bash. */
+/** Run the same command-aware, shape, then generic dispatch used by Bash. */
 export function dispatchFixture(text, command) {
   const specialized = compressCommandOutput(text, command);
   if (specialized) {
@@ -60,11 +61,12 @@ export function dispatchFixture(text, command) {
       dispatch: 'command',
     };
   }
-  const generic = compressBashOutput(text);
+  const shaped = compressShapeOutput(text);
+  const generic = compressBashOutput(shaped ? shaped.text : text);
   return {
     text: generic.text,
-    rulesApplied: generic.stats.rulesApplied,
-    dispatch: 'generic',
+    rulesApplied: [...new Set([...(shaped?.rulesApplied || []), ...generic.stats.rulesApplied])],
+    dispatch: shaped ? 'shape' : 'generic',
   };
 }
 

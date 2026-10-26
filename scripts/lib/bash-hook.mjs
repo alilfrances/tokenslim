@@ -2,6 +2,7 @@
 // the parity test all run the same code. The wrapper (compress-bash.mjs) owns the ledger and the JSON output.
 import { compressBashOutput, stripAnsi, stripProgressNoise } from './pipeline.mjs';
 import { commandMeta, compressCommandOutput } from './cmd-compressors/index.mjs';
+import { compressShapeOutput } from './shape-compressors/index.mjs';
 import { FAILURE_RE } from './cmd-compressors/shared.mjs';
 import { appendTeePath, teeOriginalOutput } from './tee.mjs';
 
@@ -56,13 +57,29 @@ function compressed(text, command, config, extra) {
       rulesApplied: specialized.rulesApplied,
     } };
   }
+  // Shape dispatch reads only the output, so it applies even when the command is unsafe or unknown.
+  const shaped = compressShapeOutput(text);
+  if (shaped) {
+    const generic = compressBashOutput(shaped.text);
+    // The generic pass also trims trailing newlines and normalizes CRLF, which is display-only like ANSI.
+    const displayOnly = stripAnsi(shaped.text).replace(/\r\n/g, '\n').replace(/\n+$/g, '');
+    return {
+      text: generic.text,
+      lossless: shaped.lossless === true && generic.text === displayOnly,
+      stats: {
+        bytesIn: Buffer.byteLength(text, 'utf8'),
+        bytesOut: generic.stats.bytesOut,
+        rulesApplied: [...new Set([...shaped.rulesApplied, ...generic.stats.rulesApplied])],
+      },
+    };
+  }
   return compressBashOutput(text);
 }
 
 function isLossy(original, result) {
-  // ANSI removal is explicitly reversible/display-only; every other change may
-  // discard information and is therefore eligible for recovery.
-  return result.text !== stripAnsi(original);
+  // ANSI removal and lossless shape rewrites (result.lossless) are reversible/display-only; every other
+  // change may discard information and is therefore eligible for recovery.
+  return result.lossless !== true && result.text !== stripAnsi(original);
 }
 
 function markCompression(text, rulesApplied) {
