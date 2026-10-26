@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { clearConfigCache, loadConfig } from '../scripts/lib/config.mjs';
+import { clearConfigCache, loadConfig, loadConfigLayerFile, mergeConfigLayer } from '../scripts/lib/config.mjs';
 
 function temp(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tokenslim-config-'));
@@ -51,4 +51,17 @@ test('config ignores malformed files and missing files', () => temp((dir) => {
   assert.deepEqual(config.rewrite.exclude, ['npm ci']);
   clearConfigCache();
   assert.equal(loadConfig(join(dir, 'missing'), { HOME: dir, XDG_CONFIG_HOME: join(dir, 'absent') }).readGuardLines, 2000);
+}));
+
+test('loadConfigLayerFile validates like a file layer but throws on unreadable or non-object files', () => temp((dir) => {
+  writeFileSync(join(dir, 'layer.json'), JSON.stringify({ minChars: 10, tee: { mode: 'bogus', maxFiles: 3 }, unknown: 1 }));
+  const layer = loadConfigLayerFile(join(dir, 'layer.json'));
+  assert.deepEqual(layer, { minChars: 10, tee: { maxFiles: 3 } });
+  const merged = mergeConfigLayer(loadConfig(dir, {}), layer);
+  assert.equal(merged.minChars, 10);
+  assert.equal(merged.tee.maxFiles, 3);
+  assert.equal(merged.tee.mode, 'lossy');
+  writeFileSync(join(dir, 'bad.json'), '[1]');
+  assert.throws(() => loadConfigLayerFile(join(dir, 'bad.json')));
+  assert.throws(() => loadConfigLayerFile(join(dir, 'missing.json')));
 }));

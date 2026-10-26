@@ -82,6 +82,17 @@ function readLayer(path) {
   }
 }
 
+/** Load one explicit config file through the same validation as the file layers; unlike them it throws on a missing or malformed file. */
+export function loadConfigLayerFile(path) {
+  const layer = validLayer(JSON.parse(readFileSync(path, 'utf8')));
+  if (!layer) throw new Error('config must be a JSON object');
+  return layer;
+}
+
+export function mergeConfigLayer(base, layer) {
+  return merge(clone(base), layer);
+}
+
 function merge(base, layer) {
   if (!layer) return base;
   const next = { ...base, ...layer };

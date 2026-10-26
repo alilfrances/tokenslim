@@ -9,6 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { compressBashOutput } from './lib/pipeline.mjs';
 import { compressCommandOutput } from './lib/cmd-compressors/index.mjs';
+import { loadConfig, loadConfigLayerFile, mergeConfigLayer } from './lib/config.mjs';
+import { processBashPayload } from './lib/bash-hook.mjs';
+import { commandFamily } from './lib/privacy.mjs';
+import { scanTranscripts, transcriptFiles } from './lib/transcripts.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const fixtureDirectory = join(root, 'tests', 'fixtures', 'bash');
@@ -213,21 +217,177 @@ export function formatLatencyText(latencies) {
   return ['Hook latency (informational; target <50ms on the largest fixture)', render(headings), widths.map((width) => '-'.repeat(width)).join('  '), ...rows.map(render)].join('\n');
 }
 
+const CHARS_PER_TOKEN = 4;
+const SKIP_REASONS = ['image', 'persisted', 'alreadyCompressed', 'belowThreshold', 'failure', 'poorRatio', 'disabled', 'error'];
+const OUTCOME_SKIP = { skippedBelowThreshold: 'belowThreshold', skippedFailure: 'failure', skippedPoorRatio: 'poorRatio', skippedImage: 'image', disabled: 'disabled' };
+
+// Number of API calls (distinct assistant messages with usage) after line `seq`: calls are in line order.
+function callsAfter(calls, seq) {
+  let low = 0; let high = calls.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (calls[mid].index <= seq) low = mid + 1; else high = mid;
+  }
+  return calls.length - low;
+}
+
+function bump(map, key, init) {
+  let item = map.get(key);
+  if (!item) { item = init; map.set(key, item); }
+  return item;
+}
+
+/**
+ * Replay every Bash tool result in the transcripts through the production Bash hook core (dry run: no tee, no ledger).
+ * Limitations: transcripts merge stdout and stderr into one string and carry no exit code, so the whole text is
+ * replayed as stdout and failure detection uses its regex fallback. Image, persisted and already-compressed results
+ * are counted but not replayed, so the savings denominator is the chars of results actually replayed.
+ */
+export function replayTranscripts({ root, sinceDays, config, now = Date.now() }) {
+  const files = transcriptFiles({ root, all: true });
+  const sinceMs = sinceDays === undefined ? undefined : now - sinceDays * 86400000;
+  const skipped = Object.fromEntries(SKIP_REASONS.map((reason) => [reason, 0]));
+  const rules = new Map(); const families = new Map();
+  const total = { scanned: 0, replayed: 0, compressed: 0, charsIn: 0, charsOut: 0, apiCalls: 0, savedTokens: 0, weightedTokens: 0, callsAfterSum: 0 };
+  for (const { pairs, calls } of scanTranscripts(files, { sinceMs, tools: ['Bash'] })) {
+    total.apiCalls += calls.length;
+    for (const pair of pairs) {
+      const command = pair.input.command;
+      if (typeof command !== 'string') continue;
+      total.scanned += 1;
+      if (pair.isImage) { skipped.image += 1; continue; }
+      if (pair.isPersisted) { skipped.persisted += 1; continue; }
+      if (pair.isCompressed) { skipped.alreadyCompressed += 1; continue; }
+      total.replayed += 1;
+      const charsIn = pair.text.length;
+      total.charsIn += charsIn;
+      const family = bump(families, commandFamily(command), { family: '', results: 0, compressed: 0, charsIn: 0, charsOut: 0 });
+      family.family = commandFamily(command); family.results += 1; family.charsIn += charsIn;
+      let result;
+      try {
+        result = processBashPayload({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: pair.text, stderr: '' } }, { config, dryRun: true });
+      } catch { skipped.error += 1; total.charsOut += charsIn; family.charsOut += charsIn; continue; }
+      let charsOut = charsIn;
+      if (result.outcome === 'compressed') {
+        charsOut = result.updatedToolOutput.stdout.length + result.updatedToolOutput.stderr.length;
+        total.compressed += 1; family.compressed += 1;
+        const savedTokens = (charsIn - charsOut) / CHARS_PER_TOKEN;
+        const after = callsAfter(calls, pair.seq);
+        total.savedTokens += savedTokens; total.weightedTokens += savedTokens * after; total.callsAfterSum += after;
+        for (const rule of result.rulesApplied) {
+          const row = bump(rules, rule, { rule, results: 0, savedChars: 0 });
+          row.results += 1; row.savedChars += charsIn - charsOut;
+        }
+      } else skipped[OUTCOME_SKIP[result.outcome] || 'error'] += 1;
+      total.charsOut += charsOut; family.charsOut += charsOut;
+    }
+  }
+  const savedChars = total.charsIn - total.charsOut;
+  const percent = (saved, base) => (base === 0 ? 0 : (saved / base) * 100);
+  const by = (a, b) => b.savedChars - a.savedChars || String(a.rule ?? a.family).localeCompare(String(b.rule ?? b.family));
+  return {
+    transcripts: root, files: files.length, sinceDays: sinceDays ?? null,
+    pairsScanned: total.scanned, skipped, replayed: total.replayed, compressed: total.compressed,
+    charsIn: total.charsIn, charsOut: total.charsOut, savedChars, savingsPct: percent(savedChars, total.charsIn),
+    byRule: [...rules.values()].sort(by),
+    byFamily: [...families.values()].map((f) => ({ ...f, savedChars: f.charsIn - f.charsOut, savingsPct: percent(f.charsIn - f.charsOut, f.charsIn) })).sort(by),
+    apiCalls: total.apiCalls,
+    costWeighted: { charsPerToken: CHARS_PER_TOKEN, savedTokens: Math.round(total.savedTokens), callsAfterSum: total.callsAfterSum, weightedTokens: Math.round(total.weightedTokens) },
+  };
+}
+
+const COST_NOTE = `cost-weighted = sum over compressed results of saved tokens x API calls after the result in the same session (tokens = chars/${CHARS_PER_TOKEN}); it is cache-read tokens avoided, so multiply by your cache-read price for dollars`;
+
+export function formatReplayText(report) {
+  const n = (value) => value.toLocaleString('en-US');
+  const skipLine = Object.entries(report.skipped).filter(([, count]) => count > 0).map(([reason, count]) => `${reason} ${n(count)}`).join(', ') || 'none';
+  return [
+    `tokenslim replay: ${n(report.files)} transcript file(s), ${n(report.pairsScanned)} Bash result(s) scanned${report.sinceDays === null ? '' : ` (last ${report.sinceDays} days)`}`,
+    `  replayed ${n(report.replayed)}, compressed ${n(report.compressed)}; skipped: ${skipLine}`,
+    `  chars in ${n(report.charsIn)}, out ${n(report.charsOut)}, saved ${n(report.savedChars)} = ${report.savingsPct.toFixed(1)}% of all replayed result chars`,
+    '',
+    'by rule (a result can have several rules, so rows overlap):',
+    ...(report.byRule.length ? report.byRule.map((r) => `  ${r.rule}  ${n(r.results)} result(s), ${n(r.savedChars)} chars saved`) : ['  (none)']),
+    '',
+    'by command family:',
+    ...(report.byFamily.length ? report.byFamily.map((f) => `  ${f.family}  ${n(f.results)} result(s), ${n(f.compressed)} compressed, ${n(f.charsIn)} -> ${n(f.charsOut)} chars (${f.savingsPct.toFixed(1)}% saved)`) : ['  (none)']),
+    '',
+    `cost-weighted: ${n(report.costWeighted.savedTokens)} tokens saved x later API calls = ${n(report.costWeighted.weightedTokens)} token-reads (${n(report.apiCalls)} API calls seen)`,
+    `  ${COST_NOTE}`,
+  ].join('\n');
+}
+
+export function formatReplayMarkdown(report) {
+  const n = (value) => value.toLocaleString('en-US');
+  return [
+    `## Transcript replay (${n(report.files)} files, ${n(report.pairsScanned)} Bash results scanned)`,
+    '',
+    `Replayed ${n(report.replayed)}, compressed ${n(report.compressed)}. Chars in ${n(report.charsIn)}, out ${n(report.charsOut)}: **${report.savingsPct.toFixed(1)}%** of all replayed result chars.`,
+    '',
+    '| Skipped | Count |', '| --- | ---: |',
+    ...Object.entries(report.skipped).map(([reason, count]) => `| ${reason} | ${n(count)} |`),
+    '',
+    '| Rule | Results | Chars saved |', '| --- | ---: | ---: |',
+    ...report.byRule.map((r) => `| ${markdownCell(r.rule)} | ${n(r.results)} | ${n(r.savedChars)} |`),
+    '',
+    '| Command family | Results | Compressed | Chars in | Chars out | Saved |', '| --- | ---: | ---: | ---: | ---: | ---: |',
+    ...report.byFamily.map((f) => `| ${markdownCell(f.family)} | ${n(f.results)} | ${n(f.compressed)} | ${n(f.charsIn)} | ${n(f.charsOut)} | ${f.savingsPct.toFixed(1)}% |`),
+    '',
+    `Cost-weighted: ${n(report.costWeighted.savedTokens)} tokens saved x later API calls = **${n(report.costWeighted.weightedTokens)}** token-reads (${n(report.apiCalls)} API calls seen). ${COST_NOTE}.`,
+  ].join('\n');
+}
+
 function usage() {
-  return 'Usage: node scripts/benchmark.mjs [--format text|md]';
+  return [
+    'Usage: node scripts/benchmark.mjs [--format text|md]',
+    '       node scripts/benchmark.mjs --transcripts <dir> [--since <days>] [--format text|json|md] [--config <path>]',
+  ].join('\n');
+}
+
+// Accepts `--flag value` and `--flag=value`; returns null on any unknown, repeated or incomplete argument.
+function parseArgs(args) {
+  const options = { format: 'text', transcripts: null, since: undefined, config: null, help: false };
+  const seen = new Set();
+  for (let i = 0; i < args.length; i += 1) {
+    const [flag, inline] = args[i].startsWith('--') && args[i].includes('=') ? [args[i].slice(0, args[i].indexOf('=')), args[i].slice(args[i].indexOf('=') + 1)] : [args[i], undefined];
+    if (flag === '--help' && inline === undefined) { options.help = true; continue; }
+    if (!['--format', '--transcripts', '--since', '--config'].includes(flag) || seen.has(flag)) return null;
+    seen.add(flag);
+    const value = inline ?? args[++i];
+    if (value === undefined || value === '') return null;
+    if (flag === '--format') { if (!['text', 'json', 'md'].includes(value)) return null; options.format = value; }
+    else if (flag === '--since') { if (!/^\d+$/.test(value)) return null; options.since = Number(value); }
+    else options[flag.slice(2)] = value;
+  }
+  if (options.help) return args.length === 1 ? options : null;
+  if (!options.transcripts && (options.format === 'json' || seen.has('--since') || seen.has('--config'))) return null;
+  return options;
 }
 
 function main(args) {
-  let format = 'text';
-  if (args.length === 1 && args[0] === '--help') {
-    process.stdout.write(`${usage()}\n`);
-    return 0;
-  }
-  if (args.length === 2 && args[0] === '--format' && ['text', 'md'].includes(args[1])) format = args[1];
-  else if (args.length > 0) {
+  const options = parseArgs(args);
+  if (!options) {
     process.stderr.write(`${usage()}\n`);
     return 2;
   }
+  if (options.help) {
+    process.stdout.write(`${usage()}\n`);
+    return 0;
+  }
+  if (options.transcripts) {
+    let config;
+    try {
+      config = loadConfig(process.cwd(), process.env);
+      if (options.config) config = mergeConfigLayer(config, loadConfigLayerFile(resolve(options.config)));
+    } catch (error) {
+      process.stderr.write(`benchmark: cannot load --config: ${error instanceof Error ? error.message : error}\n`);
+      return 2;
+    }
+    const report = replayTranscripts({ root: resolve(options.transcripts), sinceDays: options.since, config });
+    process.stdout.write(`${options.format === 'json' ? JSON.stringify(report) : options.format === 'md' ? formatReplayMarkdown(report) : formatReplayText(report)}\n`);
+    return 0;
+  }
+  const format = options.format;
 
   const results = benchmarkFixtures();
   const endToEnd = benchmarkEndToEndFixtures();
