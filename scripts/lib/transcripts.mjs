@@ -182,3 +182,50 @@ export function* scanTranscripts(files, { sinceMs, tools } = {}) {
 export function* toolPairs(files, options = {}) {
   for (const scan of scanTranscripts(files, options)) yield* scan.pairs;
 }
+
+// Characters of model-visible text Claude recorded for an attachment line (`rendered: [{ content }]`), or null when
+// the line has none (internal bookkeeping attachments carry no rendered text).
+function renderedChars(rendered) {
+  if (!Array.isArray(rendered)) return null;
+  let total = 0;
+  for (const part of rendered) if (part && typeof part.content === 'string') total += part.content.length;
+  return total;
+}
+
+const callInputTokens = (usage) => ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']
+  .reduce((sum, key) => sum + (Number.isFinite(usage?.[key]) ? usage[key] : 0), 0);
+
+/**
+ * One pass per file, yielding `{ file, attachments, toolUses, calls }` for session-level audits. `attachments` are the
+ * `type:"attachment"` lines (`{ index, timestamp, attachment, renderedChars }`, minus `skipAttachmentTypes`); `index`
+ * is on the same scale as `calls[].index`, and each call also carries `inputTokens` (fresh + cache input of that API call).
+ * `toolUses` are assistant tool_use blocks, deduplicated by id across files like scanTranscripts pairs.
+ */
+export function* scanSessions(files, { sinceMs, skipAttachmentTypes } = {}) {
+  const seenUses = new Set();
+  for (const file of files) {
+    const counter = callCounter();
+    const attachments = [];
+    const toolUses = [];
+    let index = 0;
+    for (const line of readLines(file, { sinceMs })) {
+      const before = counter.calls.length;
+      counter.add(line, index);
+      if (counter.calls.length > before) counter.calls.at(-1).inputTokens = callInputTokens(line.message.usage);
+      if (line.type === 'attachment') {
+        const attachment = line.attachment;
+        if (attachment && typeof attachment === 'object' && !skipAttachmentTypes?.has(attachment.type)) {
+          attachments.push({ index, timestamp: line.timestamp ?? null, attachment, renderedChars: renderedChars(line.rendered) });
+        }
+      } else if (line.message?.role === 'assistant' || line.type === 'assistant') {
+        for (const block of blocks(line)) {
+          if (block.kind !== 'use') continue;
+          if (block.id) { if (seenUses.has(block.id)) continue; seenUses.add(block.id); }
+          toolUses.push({ index, name: block.name, input: block.input });
+        }
+      }
+      index += 1;
+    }
+    yield { file, attachments, toolUses, calls: counter.calls };
+  }
+}
