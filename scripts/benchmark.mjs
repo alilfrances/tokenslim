@@ -100,7 +100,7 @@ function endToEndOutput(name, input, command) {
   try {
     const result = spawnSync(process.execPath, [join(root, 'scripts', 'compress-bash.mjs')], {
       cwd: root, input: JSON.stringify(payload), encoding: 'utf8', timeout: 5_000,
-      env: { ...process.env, XDG_CACHE_HOME: cache, TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) },
+      env: { ...process.env, XDG_CACHE_HOME: cache, XDG_DATA_HOME: cache, TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) },
     });
     if (result.status !== 0 || !result.stdout) return input;
     const updated = JSON.parse(result.stdout)?.hookSpecificOutput?.updatedToolOutput;
@@ -184,7 +184,7 @@ export function benchmarkHookLatency(largestFixture) {
         cwd: root,
         input: JSON.stringify(hookPayload(script, largestFixture)),
         encoding: 'utf8',
-        env: { ...process.env, XDG_CACHE_HOME: cache, TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) },
+        env: { ...process.env, XDG_CACHE_HOME: cache, XDG_DATA_HOME: cache, TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) },
         timeout: 5_000,
       });
       const milliseconds = performance.now() - started;

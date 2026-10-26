@@ -7,6 +7,7 @@ import { join as pathJoin } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { isolatedEnv } from './helpers.mjs';
 
 import {
   collapseRepeatedLines,
@@ -21,6 +22,14 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const fixtureDir = join(__dirname, 'fixtures', 'bash');
+
+// Per-call isolated XDG dirs: hooks write ledgers/history, which must never reach the real home.
+function spawnBash({ env: extraEnv = {}, ...options }) {
+  const iso = isolatedEnv(extraEnv);
+  try {
+    return spawnSync(process.execPath, ['scripts/compress-bash.mjs'], { ...options, env: iso.env });
+  } finally { iso.cleanup(); }
+}
 
 async function fixture(name) {
   return readFile(join(fixtureDir, name), 'utf8');
@@ -192,7 +201,7 @@ test('failing fixtures preserve failing names and messages verbatim', async () =
 });
 
 test('entrypoint fails open on garbage stdin', () => {
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: 'not json',
     encoding: 'utf8',
@@ -203,15 +212,15 @@ test('entrypoint fails open on garbage stdin', () => {
 
 test('entrypoint passes through small output and disabled bash output', () => {
   const payload = JSON.stringify({ session_id: 's1', tool_response: { stdout: 'short', stderr: '', interrupted: false, isImage: false } });
-  const small = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], { cwd: root, input: payload, encoding: 'utf8' });
+  const small = spawnBash({ cwd: root, input: payload, encoding: 'utf8' });
   assert.equal(small.status, 0);
   assert.equal(small.stdout, '');
 
-  const disabled = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const disabled = spawnBash({
     cwd: root,
     input: JSON.stringify({ session_id: 's1', tool_response: { stdout: 'x'.repeat(1000), stderr: '', interrupted: false, isImage: false } }),
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_DISABLE: 'bash' },
+    env: { TOKENSLIM_DISABLE: 'bash' },
   });
   assert.equal(disabled.status, 0);
   assert.equal(disabled.stdout, '');
@@ -226,7 +235,7 @@ test('Bash entrypoint preserves large non-test prose and scoped-enum source verb
     'Rust uses crate::state::TEST_PASSED for an unrelated state value.',
   ];
   const stdout = Array.from({ length: 20 }, (_, index) => `${prose[index % prose.length]} Detail ${String.fromCharCode(65 + index)} is deliberately unique.`).join('\n');
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: JSON.stringify({
       session_id: 'non-test-e2e',
@@ -236,7 +245,7 @@ test('Bash entrypoint preserves large non-test prose and scoped-enum source verb
       tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
     }),
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_HOOK_RUNTIME: 'claude', TOKENSLIM_MIN_CHARS: '1' },
+    env: { TOKENSLIM_HOOK_RUNTIME: 'claude', TOKENSLIM_MIN_CHARS: '1' },
   });
   assert.equal(result.status, 0, result.stderr);
   // Claude emits no hook payload for unchanged output, so the original is retained.
@@ -245,7 +254,7 @@ test('Bash entrypoint preserves large non-test prose and scoped-enum source verb
 
 test('Bash entrypoint handles healthy stderr conservatively while preserving real failures', async () => {
   const cacheRoot = mkdtempSync(pathJoin(tmpdir(), 'tokenslim-bash-stderr-'));
-  const run = (command, stdout = '', stderr = '', isImage = false) => spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const run = (command, stdout = '', stderr = '', isImage = false) => spawnBash({
     cwd: root,
     input: JSON.stringify({
       session_id: 'stderr-e2e',
@@ -256,7 +265,7 @@ test('Bash entrypoint handles healthy stderr conservatively while preserving rea
       tool_response: { stdout, stderr, interrupted: false, isImage },
     }),
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_HOOK_RUNTIME: 'claude', TOKENSLIM_MIN_CHARS: '1', TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER), XDG_CACHE_HOME: cacheRoot },
+    env: { TOKENSLIM_HOOK_RUNTIME: 'claude', TOKENSLIM_MIN_CHARS: '1', TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER), XDG_CACHE_HOME: cacheRoot },
   });
   const updated = (result) => JSON.parse(result.stdout).hookSpecificOutput.updatedToolOutput;
 
@@ -309,11 +318,11 @@ test('Bash entrypoint emits valid Codex no-op JSON for pass-through output', () 
     turn_id: 'turn-codex',
     tool_response: { stdout: 'short', stderr: '', interrupted: false, isImage: false },
   });
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: payload,
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_HOOK_RUNTIME: 'codex' },
+    env: { TOKENSLIM_HOOK_RUNTIME: 'codex' },
   });
 
   assert.equal(result.status, 0);
@@ -323,14 +332,14 @@ test('Bash entrypoint emits valid Codex no-op JSON for pass-through output', () 
 test('Bash entrypoint records diagnostics for skipped and compressed outputs', () => {
   const cacheRoot = mkdtempSync(pathJoin(tmpdir(), 'tokenslim-bash-diag-'));
   try {
-    const env = { ...process.env, XDG_CACHE_HOME: cacheRoot };
+    const env = { XDG_CACHE_HOME: cacheRoot };
     const smallPayload = JSON.stringify({
       session_id: 'diag-bash',
       hook_event_name: 'PostToolUse',
       tool_name: 'Bash',
       tool_response: { stdout: 'short', stderr: '', interrupted: false, isImage: false },
     });
-    const small = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    const small = spawnBash({
       cwd: root,
       input: smallPayload,
       encoding: 'utf8',
@@ -346,7 +355,7 @@ test('Bash entrypoint records diagnostics for skipped and compressed outputs', (
       tool_name: 'Bash',
       tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
     });
-    const large = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+    const large = spawnBash({
       cwd: root,
       input: largePayload,
       encoding: 'utf8',
@@ -374,11 +383,11 @@ test('Bash entrypoint treats Claude transcript payloads as non-blocking replacem
     tool_name: 'Bash',
     tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
   });
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: payload,
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_MIN_CHARS: '10' },
+    env: { TOKENSLIM_MIN_CHARS: '10' },
   });
 
   assert.equal(result.status, 0);
@@ -402,11 +411,11 @@ test('Bash entrypoint treats model-only payloads as safe-default Claude without 
     tool_use_id: 'call-1',
     tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
   });
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: payload,
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_MIN_CHARS: '10' },
+    env: { TOKENSLIM_MIN_CHARS: '10' },
   });
 
   assert.equal(result.status, 0);
@@ -426,11 +435,11 @@ test('Bash entrypoint emits valid Codex compressed additional context', () => {
     turn_id: 'turn-codex',
     tool_response: { stdout, stderr: '', interrupted: false, isImage: false },
   });
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: payload,
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_MIN_CHARS: '10', TOKENSLIM_HOOK_RUNTIME: 'codex' },
+    env: { TOKENSLIM_MIN_CHARS: '10', TOKENSLIM_HOOK_RUNTIME: 'codex' },
   });
 
   assert.equal(result.status, 0);
@@ -452,11 +461,11 @@ test('Bash entrypoint compresses Codex string tool_response payloads', () => {
     turn_id: 'turn-codex',
     tool_response: stdout,
   });
-  const result = spawnSync(process.execPath, ['scripts/compress-bash.mjs'], {
+  const result = spawnBash({
     cwd: root,
     input: payload,
     encoding: 'utf8',
-    env: { ...process.env, TOKENSLIM_HOOK_RUNTIME: 'codex' },
+    env: { TOKENSLIM_HOOK_RUNTIME: 'codex' },
   });
 
   assert.equal(result.status, 0);

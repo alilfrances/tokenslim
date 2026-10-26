@@ -7,9 +7,11 @@ import { homedir } from 'node:os';
 import { loadConfig } from './lib/config.mjs';
 import { commandFamily } from './lib/privacy.mjs';
 import { rewriteCommand } from './lib/rewrite-rules.mjs';
+import { FINAL_MARKER_RE } from './lib/transcripts.mjs';
 
 const CHARS_PER_TOKEN = 3;
-const args = process.argv.slice(2);
+// Slash-command arguments can arrive as one string ("--since 7 --all"); flags never contain spaces.
+const args = process.argv.slice(2).flatMap((a) => a.split(/\s+/)).filter(Boolean);
 const value = (flag, fallback) => { const i = args.indexOf(flag); return i < 0 ? fallback : args[i + 1] ?? fallback; };
 const format = value('--format', 'text');
 const limit = Math.max(1, Number.parseInt(value('--limit', '15'), 10) || 15);
@@ -82,8 +84,9 @@ function discover() {
         const command = uses.get(block.id); const output = block.output; const bytes = Buffer.byteLength(output, 'utf8');
         const safeCommand = commandFamily(command);
         pairs += 1; add(families, safeCommand, bytes);
-        if (!output.includes('[tokenslim:')) add(sinks, safeCommand, bytes);
-        if (!output.includes('[tokenslim:') && rewriteCommand(command, config)) add(opportunities, safeCommand, bytes);
+        const compressed = FINAL_MARKER_RE.test(output);
+        if (!compressed) add(sinks, safeCommand, bytes);
+        if (!compressed && rewriteCommand(command, config)) add(opportunities, safeCommand, bytes);
       }
     }
   }
@@ -95,4 +98,7 @@ function render(report) {
   const section = (title, rows) => [title, ...(rows.length ? rows.map((r) => `  ${r.command}  ~${r.tokens.toLocaleString()} tokens (${r.occurrences} runs)`) : ['  (none)'])];
   return ['tokenslim transcript discovery:', `  scanned ${report.scannedFiles} transcript(s), ${report.pairs} Bash result(s)`, ...section('top uncompressed sinks:', report.sinks), ...section('missed rewrite opportunities:', report.rewriteOpportunities), ...section('top command families:', report.commandFamilies)].join('\n');
 }
-try { const report = discover(); console.log(format === 'json' ? JSON.stringify(report) : render(report)); } catch { console.log(format === 'json' ? JSON.stringify({ sinks: [], rewriteOpportunities: [], commandFamilies: [], error: 'no transcripts found' }) : 'tokenslim discover: no transcripts found.'); }
+try { const report = discover(); console.log(format === 'json' ? JSON.stringify(report) : render(report)); } catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.log(format === 'json' ? JSON.stringify({ sinks: [], rewriteOpportunities: [], commandFamilies: [], error: message }) : `tokenslim discover: error: ${message}`);
+}

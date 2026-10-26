@@ -5,16 +5,20 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './helpers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GUARD_SCRIPT = join(__dirname, '..', 'scripts', 'guard-read.mjs');
 
 function run(payload, extraEnv = {}) {
-  return spawnSync('node', [GUARD_SCRIPT], {
-    input: typeof payload === 'string' ? payload : JSON.stringify(payload),
-    encoding: 'utf8',
-    env: { ...process.env, ...extraEnv },
-  });
+  const iso = isolatedEnv(extraEnv);
+  try {
+    return spawnSync('node', [GUARD_SCRIPT], {
+      input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+      encoding: 'utf8',
+      env: iso.env,
+    });
+  } finally { iso.cleanup(); }
 }
 
 function withTemp(fn) {

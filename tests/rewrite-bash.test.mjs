@@ -4,11 +4,13 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rewriteCommand } from '../scripts/lib/rewrite-rules.mjs';
+import { isolatedEnv } from './helpers.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const script = join(root, 'scripts/rewrite-bash.mjs');
 function run(payload, env = {}) {
-  return spawnSync('node', [script], { input: typeof payload === 'string' ? payload : JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, ...env } });
+  const iso = isolatedEnv(env);
+  try { return spawnSync('node', [script], { input: typeof payload === 'string' ? payload : JSON.stringify(payload), encoding: 'utf8', env: iso.env }); } finally { iso.cleanup(); }
 }
 function payload(command, extra = {}) { return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command, description: 'install' }, ...extra }; }
 

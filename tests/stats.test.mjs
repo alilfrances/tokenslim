@@ -4,6 +4,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { isolatedEnv } from './helpers.mjs';
+
+function runStats(args, extraEnv) {
+  const iso = isolatedEnv(extraEnv);
+  try { return spawnSync(process.execPath, ['scripts/stats.mjs', ...args], { cwd: join(import.meta.dirname, '..'), env: iso.env, encoding: 'utf8' }); } finally { iso.cleanup(); }
+}
 
 test('stats report includes diagnostics when available', () => {
   const cacheRoot = mkdtempSync(join(tmpdir(), 'tokenslim-stats-'));
@@ -26,11 +32,7 @@ test('stats report includes diagnostics when available', () => {
       reads: {},
     }));
 
-    const result = spawnSync('node', ['scripts/stats.mjs', 'diag-session'], {
-      cwd: join(import.meta.dirname, '..'),
-      env: { ...process.env, XDG_CACHE_HOME: cacheRoot },
-      encoding: 'utf8',
-    });
+    const result = runStats(['diag-session'], { XDG_CACHE_HOME: cacheRoot });
 
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /tokenslim diagnostics \(hook activity\):/);
@@ -52,11 +54,7 @@ test('stats report omits diagnostics section for old ledgers', () => {
       reads: {},
     }));
 
-    const result = spawnSync('node', ['scripts/stats.mjs', 'old-session'], {
-      cwd: join(import.meta.dirname, '..'),
-      env: { ...process.env, XDG_CACHE_HOME: cacheRoot },
-      encoding: 'utf8',
-    });
+    const result = runStats(['old-session'], { XDG_CACHE_HOME: cacheRoot });
 
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(result.stdout, /tokenslim diagnostics/);
@@ -95,11 +93,7 @@ test('history stats support periods, projects, graph, top, JSON, and CSV', () =>
     },
   };
 
-  const run = (...args) => spawnSync(process.execPath, ['scripts/stats.mjs', ...args], {
-    cwd: repoRoot,
-    env: { ...process.env, XDG_CACHE_HOME: cacheRoot, XDG_DATA_HOME: dataRoot },
-    encoding: 'utf8',
-  });
+  const run = (...args) => runStats(args, { XDG_CACHE_HOME: cacheRoot, XDG_DATA_HOME: dataRoot });
 
   try {
     mkdirSync(join(dataRoot, 'tokenslim'), { recursive: true });
