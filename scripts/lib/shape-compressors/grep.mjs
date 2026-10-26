@@ -5,6 +5,9 @@
 //   src/a.js-31-ctx      ->    30:bar
 //                        ->    31-ctx
 // Members keep the original separator (`:` match, `-` context), so ungroup() restores every byte.
+// Consecutive MATCH members whose text is byte-identical share one line, `  12,30,48:foo`: the line numbers come
+// first and the separator is the first character that is not a digit or comma, so the text (even one starting with
+// digits) never affects parsing. Context members and non-adjacent members are never listed.
 //
 // Parsing decisions (the grouping is only ever applied to lines parsed this way):
 // - A match line is `path:N:text`; the path ends at the FIRST colon and has no whitespace. A context line is
@@ -15,11 +18,11 @@
 //   start with `-`. That rejects `12:34:56` clocks, `2026-10-26T12:34:56Z` stamps, `[12:34:56]`, IPs and
 //   `host:8080` pairs, whose "path" part would otherwise repeat on consecutive lines.
 // - A header is a non-indented line directly followed by an indented member. Every other line passes through
-//   verbatim, so if any verbatim line itself looks like a member (`  12:...`) we decline rather than let
-//   ungroup() misread it.
+//   verbatim, so if any verbatim line itself looks like a member (`  12:...` or `  12,30:...`) we decline rather
+//   than let ungroup() misread it.
 const MATCH_RE = /^([^\s:][^\s:]*):(\d{1,7}):([^\n]*)$/;
 const CONTEXT_REST_RE = /^(\d{1,7})-([^\n]*)$/;
-const MEMBER_RE = /^ {2}(\d{1,7})([:-])([^\n]*)$/;
+const MEMBER_RE = /^ {2}(\d{1,7}(?:,\d{1,7})*)([:-])([^\n]*)$/;
 const MIN_LINES = 8;
 const MIN_SHARE = 0.6;
 
@@ -60,6 +63,23 @@ function shrinks(run) {
   return run.length * (pathLength - 1) - (pathLength + 1) > 0;
 }
 
+// Member lines for one run. A stretch of two or more consecutive match entries with byte-identical text becomes one
+// line listing their line numbers. Text starting with a digit or comma is never list-merged: it would read as part
+// of the number list to a human even though the parse is unambiguous.
+function memberLines(run) {
+  const lines = [];
+  for (let i = 0; i < run.length;) {
+    const entry = run[i];
+    let end = i + 1;
+    if (entry.sep === ':' && !/^[\d,]/.test(entry.text)) {
+      while (end < run.length && run[end].sep === ':' && run[end].text === entry.text) end += 1;
+    }
+    lines.push(`  ${run.slice(i, end).map((member) => member.n).join(',')}${entry.sep}${entry.text}`);
+    i = end;
+  }
+  return lines;
+}
+
 /** Returns the grouped text, or null when the text is not grep-shaped, nothing would shrink, or it is ambiguous. */
 export function group(text) {
   const lines = String(text ?? '').split('\n');
@@ -76,7 +96,7 @@ export function group(text) {
     if (first) while (end < lines.length && parsed[end]?.path === first.path) end += 1;
     const run = first ? parsed.slice(i, end) : [];
     if (run.length >= 2 && shrinks(run)) {
-      output.push(first.path, ...run.map((entry) => `  ${entry.n}${entry.sep}${entry.text}`));
+      output.push(first.path, ...memberLines(run));
       grouped = true;
     } else {
       for (let j = i; j < end; j += 1) {
@@ -104,14 +124,15 @@ export function omittedMatchCounts(lines, start, end) {
   for (let i = 0; i < lines.length; i += 1) {
     const member = MEMBER_RE.exec(lines[i]);
     if (raw[i]) {
-      info[i] = { path: raw[i].path, match: raw[i].sep === ':' };
+      info[i] = { path: raw[i].path, match: raw[i].sep === ':', weight: 1 };
       current = null;
     } else if (member && current) {
-      info[i] = { path: current, match: member[2] === ':' };
+      // A listed member line stands for one hit per number.
+      info[i] = { path: current, match: member[2] === ':', weight: member[1].split(',').length };
     } else if (!member && MEMBER_RE.test(lines[i + 1] ?? '')) {
       // A group header (see group()): the path for the members that follow.
       current = lines[i];
-      info[i] = { path: current, match: false };
+      info[i] = { path: current, match: false, weight: 1 };
     } else {
       current = null;
     }
@@ -121,12 +142,13 @@ export function omittedMatchCounts(lines, start, end) {
   let matches = 0;
   const counts = new Map();
   for (let i = start; i < end; i += 1) {
-    if (lines[i].trim() !== '') nonEmpty += 1;
+    const weight = info[i]?.weight ?? 1;
+    if (lines[i].trim() !== '') nonEmpty += weight;
     if (!info[i]) continue;
-    parsed += 1;
+    parsed += weight;
     if (!info[i].match) continue;
-    matches += 1;
-    counts.set(info[i].path, (counts.get(info[i].path) || 0) + 1);
+    matches += weight;
+    counts.set(info[i].path, (counts.get(info[i].path) || 0) + weight);
   }
   if (matches < MIN_LINES || parsed < nonEmpty * MIN_SHARE) return null;
   return [...counts];
@@ -140,11 +162,34 @@ export function ungroup(text) {
     if (!MEMBER_RE.test(lines[i + 1] ?? '')) { output.push(lines[i]); continue; }
     const path = lines[i];
     for (let member = MEMBER_RE.exec(lines[i + 1] ?? ''); member; member = MEMBER_RE.exec(lines[i + 1] ?? '')) {
-      output.push(`${path}${member[2]}${member[1]}${member[2]}${member[3]}`);
+      for (const n of member[1].split(',')) output.push(`${path}${member[2]}${n}${member[2]}${member[3]}`);
       i += 1;
     }
   }
   return output.join('\n');
+}
+
+/**
+ * Which lines carry a grep hit location, for pipeline rules that must never merge two different locations: raw
+ * `path:N:text` and `path-N-text` lines (same parse rules and file-looking path check as group()) and grouped
+ * `  N:text` / `  N,M:text` members. Returns one boolean per input line.
+ */
+export function locationMask(lines) {
+  const parsed = parseLines(lines);
+  return lines.map((line, i) => Boolean(parsed[i]) || MEMBER_RE.test(line));
+}
+
+/**
+ * The set of hit locations in `text` as `path:line` strings (matches and context lines). Pass grouped: true for
+ * text produced by group(), which is expanded by ungroup() first; raw text must NOT be ungrouped because a
+ * verbatim line shaped like a member would be misread.
+ */
+export function grepLocations(text, { grouped = false } = {}) {
+  const raw = grouped ? ungroup(text) : String(text ?? '');
+  const lines = raw.split('\n');
+  const found = new Set();
+  parseLines(lines).forEach((entry) => { if (entry) found.add(`${entry.path}:${Number(entry.n)}`); });
+  return found;
 }
 
 export function compress(text) {

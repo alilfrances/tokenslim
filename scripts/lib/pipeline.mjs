@@ -1,4 +1,4 @@
-import { omittedMatchCounts } from './shape-compressors/grep.mjs';
+import { locationMask, omittedMatchCounts } from './shape-compressors/grep.mjs';
 
 const DEFAULT_MAX_CHARS = 40000;
 const DEFAULT_HEAD_LINES = 150;
@@ -18,6 +18,13 @@ const sameText = (a, b) => trimEnd(a) === trimEnd(b);
 
 function normalizeNewlines(text) {
   return String(text ?? '').replace(/\r\n/g, '\n');
+}
+
+/** Display-only cleanup (ANSI, CRLF, trailing newlines) for output a lossless shape compressor already rewrote. */
+export function cleanDisplay(text) {
+  const input = String(text ?? '');
+  const withoutAnsi = stripAnsi(input);
+  return { text: normalizeNewlines(withoutAnsi).replace(/\n+$/g, ''), rulesApplied: withoutAnsi !== input ? ['stripAnsi'] : [] };
 }
 
 function isProgressNoise(line, { buildProgress = false } = {}) {
@@ -104,11 +111,15 @@ function flushRepeat(buffer, output) {
 
 export function collapseRepeatedLines(text) {
   const lines = normalizeNewlines(text).split('\n');
+  // Fingerprints erase every number, so grep hits that differ only in their line number look identical. A
+  // location-bearing line may therefore join a run only as a byte-identical copy; the location is the answer.
+  const located = locationMask(lines);
   const output = [];
   let buffer = [];
   let fp = '';
+  let bufferLocated = false;
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const current = fingerprintLine(line);
     if (!current) {
       flushRepeat(buffer, output);
@@ -121,12 +132,13 @@ export function collapseRepeatedLines(text) {
     if (buffer.length === 0) {
       buffer = [line];
       fp = current;
+      bufferLocated = located[index];
       continue;
     }
 
     // Do not bridge a run across a different line: that line may be a unique
     // warning. Fingerprints alone are also insufficient for numbered listings.
-    if (current === fp && hasStrongRawSimilarity(buffer[0], line)) {
+    if (current === fp && hasStrongRawSimilarity(buffer[0], line) && (!(bufferLocated || located[index]) || line === buffer[0])) {
       buffer.push(line);
       continue;
     }
@@ -134,6 +146,7 @@ export function collapseRepeatedLines(text) {
     flushRepeat(buffer, output);
     buffer = [line];
     fp = current;
+    bufferLocated = located[index];
   }
 
   flushRepeat(buffer, output);

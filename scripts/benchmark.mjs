@@ -7,9 +7,10 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { compressBashOutput } from './lib/pipeline.mjs';
+import { cleanDisplay, compressBashOutput } from './lib/pipeline.mjs';
 import { compressCommandOutput } from './lib/cmd-compressors/index.mjs';
 import { compressShapeOutput } from './lib/shape-compressors/index.mjs';
+import { grepLocations } from './lib/shape-compressors/grep.mjs';
 import { loadConfig, loadConfigLayerFile, mergeConfigLayer } from './lib/config.mjs';
 import { processBashPayload } from './lib/bash-hook.mjs';
 import { commandFamily } from './lib/privacy.mjs';
@@ -62,12 +63,13 @@ export function dispatchFixture(text, command) {
     };
   }
   const shaped = compressShapeOutput(text);
-  const generic = compressBashOutput(shaped ? shaped.text : text);
-  return {
-    text: generic.text,
-    rulesApplied: [...new Set([...(shaped?.rulesApplied || []), ...generic.stats.rulesApplied])],
-    dispatch: shaped ? 'shape' : 'generic',
-  };
+  if (shaped) {
+    // Mirrors the hook: a lossless shape gets display-only cleanup, never the generic lossy rules.
+    const clean = cleanDisplay(shaped.text);
+    return { text: clean.text, rulesApplied: [...new Set([...shaped.rulesApplied, ...clean.rulesApplied])], dispatch: 'shape' };
+  }
+  const generic = compressBashOutput(text);
+  return { text: generic.text, rulesApplied: generic.stats.rulesApplied, dispatch: 'generic' };
 }
 
 export function benchmarkFixtures(directory = fixtureDirectory) {
@@ -247,12 +249,18 @@ function bump(map, key, init) {
  * Limitations: transcripts merge stdout and stderr into one string and carry no exit code, so the whole text is
  * replayed as stdout and failure detection uses its regex fallback. Image, persisted and already-compressed results
  * are counted but not replayed, so the savings denominator is the chars of results actually replayed.
+ *
+ * audit: also compare, for every compressed result, the grep hit locations (path:line, see grepLocations) parsed from
+ * the input with those recoverable from the output (expanded with ungroup() when groupByPath applied). A result that
+ * lost any is a locationLoss; the report carries the count, up to 5 example tool_use ids and the rules those
+ * results applied. Exists to catch compression that drops the one thing grep output is for.
  */
-export function replayTranscripts({ root, sinceDays, config, now = Date.now() }) {
+export function replayTranscripts({ root, sinceDays, config, now = Date.now(), audit = false }) {
   const files = transcriptFiles({ root, all: true });
   const sinceMs = sinceDays === undefined ? undefined : now - sinceDays * 86400000;
   const skipped = Object.fromEntries(SKIP_REASONS.map((reason) => [reason, 0]));
   const rules = new Map(); const families = new Map(); const capExempt = {};
+  const location = { checked: 0, lost: 0, examples: [], byRule: new Map() };
   const total = { scanned: 0, replayed: 0, compressed: 0, charsIn: 0, charsOut: 0, apiCalls: 0, savedTokens: 0, weightedTokens: 0, callsAfterSum: 0 };
   for (const { pairs, calls } of scanTranscripts(files, { sinceMs, tools: ['Bash'] })) {
     total.apiCalls += calls.length;
@@ -276,6 +284,18 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now() })
       let charsOut = charsIn;
       if (result.outcome === 'compressed') {
         charsOut = result.updatedToolOutput.stdout.length + result.updatedToolOutput.stderr.length;
+        if (audit) {
+          const before = grepLocations(pair.text);
+          if (before.size > 0) {
+            location.checked += 1;
+            const after = grepLocations(result.updatedToolOutput.stdout, { grouped: result.rulesApplied.includes('groupByPath') });
+            if ([...before].some((entry) => !after.has(entry))) {
+              location.lost += 1;
+              if (location.examples.length < 5) location.examples.push(pair.id);
+              for (const rule of result.rulesApplied) location.byRule.set(rule, (location.byRule.get(rule) || 0) + 1);
+            }
+          }
+        }
         total.compressed += 1; family.compressed += 1;
         const savedTokens = (charsIn - charsOut) / CHARS_PER_TOKEN;
         const after = callsAfter(calls, pair.seq);
@@ -298,6 +318,7 @@ export function replayTranscripts({ root, sinceDays, config, now = Date.now() })
     capExempt,
     byRule: [...rules.values()].sort(by),
     byFamily: [...families.values()].map((f) => ({ ...f, savedChars: f.charsIn - f.charsOut, savingsPct: percent(f.charsIn - f.charsOut, f.charsIn) })).sort(by),
+    ...(audit ? { locationChecked: location.checked, locationLoss: location.lost, locationLossExamples: location.examples, locationLossByRule: Object.fromEntries([...location.byRule].sort(([a], [b]) => a.localeCompare(b))) } : {}),
     apiCalls: total.apiCalls,
     costWeighted: { charsPerToken: CHARS_PER_TOKEN, savedTokens: Math.round(total.savedTokens), callsAfterSum: total.callsAfterSum, weightedTokens: Math.round(total.weightedTokens) },
   };
@@ -310,6 +331,16 @@ function capExemptLine(report) {
   return entries.length ? [`  output cap left alone: ${entries.map(([reason, count]) => `${reason} ${count.toLocaleString('en-US')}`).join(', ')}`] : [];
 }
 
+function auditLines(report) {
+  if (report.locationLoss === undefined) return [];
+  const rules = Object.entries(report.locationLossByRule).map(([rule, count]) => `${rule} ${count}`).join(', ');
+  return [
+    `  audit: ${report.locationChecked.toLocaleString('en-US')} compressed result(s) carried grep hit locations`,
+    `  locationLoss: ${report.locationLoss}`,
+    ...(report.locationLoss > 0 ? [`  examples (tool_use ids): ${report.locationLossExamples.join(', ')}`, `  rules on the lossy results: ${rules || 'none'}`] : []),
+  ];
+}
+
 export function formatReplayText(report) {
   const n = (value) => value.toLocaleString('en-US');
   const skipLine = Object.entries(report.skipped).filter(([, count]) => count > 0).map(([reason, count]) => `${reason} ${n(count)}`).join(', ') || 'none';
@@ -318,6 +349,7 @@ export function formatReplayText(report) {
     `  replayed ${n(report.replayed)}, compressed ${n(report.compressed)}; skipped: ${skipLine}`,
     `  chars in ${n(report.charsIn)}, out ${n(report.charsOut)}, saved ${n(report.savedChars)} = ${report.savingsPct.toFixed(1)}% of all replayed result chars`,
     ...capExemptLine(report),
+    ...auditLines(report),
     '',
     'by rule (a result can have several rules, so rows overlap):',
     ...(report.byRule.length ? report.byRule.map((r) => `  ${r.rule}  ${n(r.results)} result(s), ${n(r.savedChars)} chars saved`) : ['  (none)']),
@@ -338,6 +370,7 @@ export function formatReplayMarkdown(report) {
     `Replayed ${n(report.replayed)}, compressed ${n(report.compressed)}. Chars in ${n(report.charsIn)}, out ${n(report.charsOut)}: **${report.savingsPct.toFixed(1)}%** of all replayed result chars.`,
     '',
     ...capExemptLine(report).flatMap((line) => [`${line.trim()}.`, '']),
+    ...auditLines(report).flatMap((line) => [`${line.trim()}`, '']),
     '| Skipped | Count |', '| --- | ---: |',
     ...Object.entries(report.skipped).map(([reason, count]) => `| ${reason} | ${n(count)} |`),
     '',
@@ -354,17 +387,18 @@ export function formatReplayMarkdown(report) {
 function usage() {
   return [
     'Usage: node scripts/benchmark.mjs [--format text|md]',
-    '       node scripts/benchmark.mjs --transcripts <dir> [--since <days>] [--format text|json|md] [--config <path>]',
+    '       node scripts/benchmark.mjs --transcripts <dir> [--since <days>] [--format text|json|md] [--config <path>] [--audit]',
   ].join('\n');
 }
 
 // Accepts `--flag value` and `--flag=value`; returns null on any unknown, repeated or incomplete argument.
 function parseArgs(args) {
-  const options = { format: 'text', transcripts: null, since: undefined, config: null, help: false };
+  const options = { format: 'text', transcripts: null, since: undefined, config: null, audit: false, help: false };
   const seen = new Set();
   for (let i = 0; i < args.length; i += 1) {
     const [flag, inline] = args[i].startsWith('--') && args[i].includes('=') ? [args[i].slice(0, args[i].indexOf('=')), args[i].slice(args[i].indexOf('=') + 1)] : [args[i], undefined];
     if (flag === '--help' && inline === undefined) { options.help = true; continue; }
+    if (flag === '--audit' && inline === undefined && !seen.has(flag)) { seen.add(flag); options.audit = true; continue; }
     if (!['--format', '--transcripts', '--since', '--config'].includes(flag) || seen.has(flag)) return null;
     seen.add(flag);
     const value = inline ?? args[++i];
@@ -374,7 +408,7 @@ function parseArgs(args) {
     else options[flag.slice(2)] = value;
   }
   if (options.help) return args.length === 1 ? options : null;
-  if (!options.transcripts && (options.format === 'json' || seen.has('--since') || seen.has('--config'))) return null;
+  if (!options.transcripts && (options.format === 'json' || seen.has('--since') || seen.has('--config') || options.audit)) return null;
   return options;
 }
 
@@ -397,7 +431,7 @@ function main(args) {
       process.stderr.write(`benchmark: cannot load --config: ${error instanceof Error ? error.message : error}\n`);
       return 2;
     }
-    const report = replayTranscripts({ root: resolve(options.transcripts), sinceDays: options.since, config });
+    const report = replayTranscripts({ root: resolve(options.transcripts), sinceDays: options.since, config, audit: options.audit });
     process.stdout.write(`${options.format === 'json' ? JSON.stringify(report) : options.format === 'md' ? formatReplayMarkdown(report) : formatReplayText(report)}\n`);
     return 0;
   }

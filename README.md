@@ -151,8 +151,9 @@ stop message while the compressed output is added through
 
 - **Bash** — command-aware compressors handle Git, package managers, test runners,
   linters, and container tables. Grep-shaped output (`rg -n`, `grep -rn`, `-C` context) is
-  regrouped by file, losslessly, from the output text alone, so it also works on compound
-  commands and pipelines where command-aware compressors step aside. The generic fallback
+  regrouped by file, losslessly, from the output text alone (hits that share their text are listed
+  as `  40,47,54:text`), so it also works on compound commands and pipelines where command-aware
+  compressors step aside. Grep hit locations are never dropped or collapsed. The generic fallback
   strips ANSI/progress noise, collapses repeated logs and stack traces, and head+tail
   truncates only outputs still over 40KB (or over `bash.capChars` when the opt-in cap is
   on). Failing test names and error text stay **verbatim**. Quiet-flag rewrites before
@@ -221,7 +222,7 @@ and how often it was actually used.
 ### Replay benchmark on your own transcripts
 
 ```bash
-node scripts/benchmark.mjs --transcripts <dir> [--since N] [--format text|json|md] [--config <file>]
+node scripts/benchmark.mjs --transcripts <dir> [--since N] [--format text|json|md] [--config <file>] [--audit]
 ```
 
 Replays every Bash result in the transcripts under `<dir>` (a Claude `projects` directory, or any
@@ -234,8 +235,10 @@ calls that came after each compressed result in the same session, i.e. cache-rea
 multiply by your cache-read price for dollars. `--config <file>` applies an explicit tokenslim config
 layer, so you can compare settings (for example `{"bash":{"capChars":8000}}`) without editing your
 configuration; the report also tallies which outputs the cap left alone. Transcripts merge stdout and
-stderr and do not record exit codes, so failure detection falls back to a text heuristic. Without
-`--transcripts` the command prints the fixture benchmark above.
+stderr and do not record exit codes, so failure detection falls back to a text heuristic. `--audit`
+also checks, for every compressed result, that each grep hit location (`path:line`) in the input is
+still recoverable from the output (grouped output is expanded first) and reports `locationLoss: N`
+with up to five example `tool_use` ids; it should always be 0. Without `--transcripts` the command prints the fixture benchmark above.
 
 ## Configuration (env vars)
 

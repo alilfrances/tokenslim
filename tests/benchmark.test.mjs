@@ -160,6 +160,24 @@ test('replay of an empty or missing transcript directory reports zeros', () => {
   assert.equal(report.savingsPct, 0);
 });
 
+// --- WP1 (v0.4.1): the replay audit catches grep hit locations that compression drops ---
+const auditDirectory = join(root, 'tests', 'fixtures', 'audit');
+
+test('replay --audit reports locationLoss 0 on the grep reproduction transcript, with ids only when there is loss', () => {
+  const report = JSON.parse(benchmark(['--transcripts', auditDirectory, '--since', '3650', '--audit', '--format', 'json']).stdout);
+  assert.equal(report.pairsScanned, 2);
+  assert.equal(report.locationChecked >= 1, true, 'the grouped reproduction is compressed and audited');
+  assert.equal(report.locationLoss, 0);
+  assert.deepEqual(report.locationLossExamples, []);
+  const text = benchmark(['--transcripts', auditDirectory, '--since', '3650', '--audit']).stdout;
+  assert.match(text, /^  locationLoss: 0$/m);
+  assert.doesNotMatch(text, /examples \(tool_use ids\)/);
+  assert.match(benchmark(['--transcripts', auditDirectory, '--audit', '--format', 'md']).stdout, /^locationLoss: 0$/m);
+  // Without --audit the report has no audit fields at all.
+  assert.equal('locationLoss' in JSON.parse(benchmark(['--transcripts', auditDirectory, '--format', 'json']).stdout), false);
+  for (const args of [['--audit'], ['--transcripts', auditDirectory, '--audit', '--audit']]) assert.equal(benchmark(args).status, 2, args.join(' '));
+});
+
 test('processBashPayload matches the spawned hook for every bash fixture', () => {
   const iso = isolatedEnv({ TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER) });
   const stderrFixtures = new Set(['cargo-build.txt', 'docker-pull.txt']);
