@@ -1,0 +1,80 @@
+scripts/lib/tee.mjs-15-}
+scripts/lib/tee.mjs-16-
+scripts/lib/tee.mjs:17:export function teePath(sessionId, toolUseId, env = process.env) {
+scripts/lib/tee.mjs-18-  const session = stableId(sessionId);
+scripts/lib/tee.mjs-19-  const toolUse = stableId(toolUseId);
+scripts/lib/tee.mjs-20-  if (!session || !toolUse) return null;
+scripts/lib/tee.mjs:21:  const home = env.HOME || homedir();
+scripts/lib/tee.mjs:22:  const cacheHome = env.XDG_CACHE_HOME || join(home, '.cache');
+scripts/lib/tee.mjs-23-  return join(cacheHome, 'tokenslim', 'tee', session, `${toolUse}.log`);
+scripts/lib/tee.mjs-24-}
+scripts/lib/tee.mjs-25-
+scripts/lib/tee.mjs:26:export function teeMinBytes(env = process.env) {
+scripts/lib/tee.mjs:27:  const value = Number(env.TOKENSLIM_TEE_MIN);
+scripts/lib/tee.mjs-28-  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_MIN_BYTES;
+scripts/lib/tee.mjs-29-}
+scripts/lib/tee.mjs-30-
+scripts/lib/tee.mjs:31:function teeEnabled(config, env) {
+scripts/lib/tee.mjs:32:  const disabled = String(env.TOKENSLIM_DISABLE || '').toLowerCase().split(',').map((x) => x.trim());
+scripts/lib/tee.mjs-33-  if (disabled.includes('all') || disabled.includes('tee')) return false;
+scripts/lib/tee.mjs-34-  const tee = config?.tee || {};
+--
+scripts/lib/tee.mjs-52-  toolUseId,
+scripts/lib/tee.mjs-53-  config = {},
+scripts/lib/tee.mjs:54:  env = process.env,
+scripts/lib/tee.mjs-55-  lossy = false,
+scripts/lib/tee.mjs-56-  failed = false,
+scripts/lib/tee.mjs-57-} = {}) {
+scripts/lib/tee.mjs-58-  try {
+scripts/lib/tee.mjs:59:    if (!lossy || !teeEnabled(config, env)) return null;
+scripts/lib/tee.mjs-60-    const mode = config?.tee?.mode || 'lossy';
+scripts/lib/tee.mjs-61-    if (mode === 'failures' && !failed) return null;
+scripts/lib/tee.mjs-62-    if (mode !== 'lossy' && mode !== 'failures') return null;
+scripts/lib/tee.mjs:63:    if (Buffer.byteLength(String(text ?? ''), 'utf8') < teeMinBytes(env)) return null;
+scripts/lib/tee.mjs:64:    const path = teePath(sessionId, toolUseId, env);
+scripts/lib/tee.mjs-65-    const maxFiles = Number.isFinite(config?.tee?.maxFiles) ? config.tee.maxFiles : DEFAULT_MAX_FILES;
+scripts/lib/tee.mjs-66-    if (!path || maxFiles <= 0) return null;
+--
+scripts/lib/state.mjs-16-
+scripts/lib/state.mjs-17-function cacheDir() {
+scripts/lib/state.mjs:18:  const base = process.env.XDG_CACHE_HOME || join(homedir(), '.cache');
+scripts/lib/state.mjs-19-  return join(base, 'tokenslim');
+scripts/lib/state.mjs-20-}
+--
+scripts/lib/history.mjs-7-export const RETENTION_DAYS = 90;
+scripts/lib/history.mjs-8-export function dataDir() {
+scripts/lib/history.mjs:9:  return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'tokenslim');
+scripts/lib/history.mjs-10-}
+scripts/lib/history.mjs-11-export function historyPath() { return join(dataDir(), 'history.json'); }
+--
+scripts/lib/privacy.mjs-2-
+scripts/lib/privacy.mjs-3-// Only these tools have stable, non-sensitive second-token subcommands. Arguments,
+scripts/lib/privacy.mjs:4:// paths, URLs, package names, headers, and environment assignments are never persisted.
+scripts/lib/privacy.mjs-5-const SUBCOMMAND_TOOLS = new Set([
+scripts/lib/privacy.mjs-6-  'cargo', 'composer', 'docker', 'gh', 'git', 'go', 'gradle', 'helm', 'kubectl',
+--
+scripts/lib/privacy.mjs-30-/**
+scripts/lib/privacy.mjs-31- * Return a privacy-safe command family for local analytics and discovery reports.
+scripts/lib/privacy.mjs:32: * Full command lines can contain credentials, URLs, paths, and inline environment
+scripts/lib/privacy.mjs-33- * variables, so they must never be written to tokenslim ledgers/history.
+scripts/lib/privacy.mjs-34- */
+--
+scripts/lib/config.mjs-101-}
+scripts/lib/config.mjs-102-
+scripts/lib/config.mjs:103:function envLayer(env) {
+scripts/lib/config.mjs-104-  const layer = {};
+scripts/lib/config.mjs-105-  const number = (key) => {
+scripts/lib/config.mjs:106:    const value = Number(env[key]);
+scripts/lib/config.mjs-107-    return Number.isFinite(value) && value >= 0 ? value : undefined;
+scripts/lib/config.mjs-108-  };
+--
+scripts/lib/config.mjs-113-  if (readGuardLines !== undefined) layer.readGuardLines = readGuardLines;
+scripts/lib/config.mjs-114-  if (readDefaultLines !== undefined) layer.readDefaultLines = readDefaultLines;
+scripts/lib/config.mjs:115:  if (typeof env.TOKENSLIM_DISABLE === 'string') {
+scripts/lib/config.mjs:116:    layer.disable = env.TOKENSLIM_DISABLE.split(',').map((part) => part.trim()).filter(Boolean);
+scripts/lib/config.mjs-117-  }
+scripts/lib/config.mjs:118:  if (typeof env.TOKENSLIM_REWRITE_ENABLED === 'string') {
+scripts/lib/config.mjs:119:    const value = env.TOKENSLIM_REWRITE_ENABLED.toLowerCase();
+scripts/lib/config.mjs-120-    if (value === 'true' || value === 'false') layer.rewrite = { ...(layer.rewrite || {}), enabled: value === 'true' };
+scripts/lib/config.mjs-121-  }
+scripts/lib/config.mjs:122:  if (typeof env.TOKENSLIM_REWRITE_EXCLUDE === 'string') {

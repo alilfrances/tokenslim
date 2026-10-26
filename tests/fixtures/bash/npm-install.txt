@@ -1,7 +1,7 @@
-\u001b[32mnpm\u001b[0m timing idealTree:init Completed in 18ms
-\u001b[32mnpm\u001b[0m timing idealTree:userRequests Completed in 4ms
-\u001b[32mnpm\u001b[0m http fetch GET 200 https://registry.npmjs.org/react 84ms (cache revalidated)
-\u001b[32mnpm\u001b[0m http fetch GET 200 https://registry.npmjs.org/react-dom 92ms (cache revalidated)
+[32mnpm[0m timing idealTree:init Completed in 18ms
+[32mnpm[0m timing idealTree:userRequests Completed in 4ms
+[32mnpm[0m http fetch GET 200 https://registry.npmjs.org/react 84ms (cache revalidated)
+[32mnpm[0m http fetch GET 200 https://registry.npmjs.org/react-dom 92ms (cache revalidated)
 reify:lodash: timing reifyNode:node_modules/lodash Completed in 4ms
 reify:lodash: timing reifyNode:node_modules/lodash Completed in 5ms
 reify:lodash: timing reifyNode:node_modules/lodash Completed in 6ms
@@ -48,7 +48,7 @@ reify:vitest: timing reifyNode:node_modules/vitest Completed in 103ms
 reify:vitest: timing reifyNode:node_modules/vitest Completed in 104ms
 added 412 packages, and audited 413 packages in 8s
 found 0 vulnerabilities
-progress 01% [>...................] \rprogress 05% [=>..................] \rprogress 10% [==>.................] \rprogress 15% [===>................] \rprogress 20% [====>...............] \rprogress 25% [=====>..............] \rprogress 30% [======>.............] \rprogress 35% [=======>............] \rprogress 40% [========>...........] \rprogress 45% [=========>..........] \rprogress 50% [==========>.........] \rprogress 55% [===========>........] \rprogress 60% [============>.......] \rprogress 65% [=============>......] \rprogress 70% [==============>.....] \rprogress 75% [===============>....] \rprogress 80% [================>...] \rprogress 85% [=================>..] \rprogress 90% [==================>.] \rprogress 95% [===================>] \rprogress 100% [====================]
+progress 01% [>...................] progress 05% [=>..................] progress 10% [==>.................] progress 15% [===>................] progress 20% [====>...............] progress 25% [=====>..............] progress 30% [======>.............] progress 35% [=======>............] progress 40% [========>...........] progress 45% [=========>..........] progress 50% [==========>.........] progress 55% [===========>........] progress 60% [============>.......] progress 65% [=============>......] progress 70% [==============>.....] progress 75% [===============>....] progress 80% [================>...] progress 85% [=================>..] progress 90% [==================>.] progress 95% [===================>] progress 100% [====================]
 timing arborist:ctor Completed in 0ms
 timing idealTree Completed in 512ms
 timing reify Completed in 1302ms

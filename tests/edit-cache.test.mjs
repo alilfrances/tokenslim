@@ -5,17 +5,21 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './helpers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const READ_SCRIPT = join(__dirname, '..', 'scripts', 'compress-read.mjs');
 const EDIT_SCRIPT = join(__dirname, '..', 'scripts', 'compress-edit.mjs');
 
 function run(script, payload, extraEnv = {}) {
-  return spawnSync('node', [script], {
-    input: typeof payload === 'string' ? payload : JSON.stringify(payload),
-    encoding: 'utf8',
-    env: { ...process.env, ...extraEnv },
-  });
+  const iso = isolatedEnv(extraEnv);
+  try {
+    return spawnSync('node', [script], {
+      input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+      encoding: 'utf8',
+      env: iso.env,
+    });
+  } finally { iso.cleanup(); }
 }
 
 function parseOutput(result) {

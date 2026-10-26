@@ -2,9 +2,11 @@
 
 **Input-token compressor for Claude Code and Codex.** Shrinks tool results — Bash output, file
 reads, Grep/Glob results, MCP tool results — *before* they enter the model's context. It
-also applies conservative Bash quiet-flag rewrites, keeps the Read dedup cache warm across
-Edit/Write, provides recovery copies and cross-session reporting, and warns before large
-unbounded reads. Deterministic, prompt-cache safe, zero dependencies, fail-open.
+also keeps the Read dedup cache warm across Edit/Write, provides recovery copies and
+cross-session reporting, audits always-on context overhead, and warns before large
+unbounded reads. Opt-in extras: Bash quiet-flag rewrites, a mid-band Bash output cap, and a
+Read guard that holds back huge reads. Deterministic, prompt-cache safe, zero dependencies,
+fail-open.
 
 ## Fixture benchmark
 
@@ -15,27 +17,40 @@ realistic stderr routing for cargo and docker progress. Real commands vary by pr
 
 | Fixture | Pipeline reduction | E2E bytes out | E2E reduction | Rules applied |
 | --- | ---: | ---: | ---: | --- |
-| cargo-build.txt | 91.9% | 701 | 66.6% | packageManagerSummary |
+| cargo-build.txt | 91.8% | 701 | 66.5% | packageManagerSummary |
 | docker-ps.txt | 27.6% | 232 | 0.0% | dockerTable |
-| docker-pull.txt | 87.1% | 368 | 84.0% | stripProgressNoise, collapseRepeatedLines |
+| docker-pull.txt | 87.0% | 368 | 83.8% | stripProgressNoise, collapseRepeatedLines |
 | eslint.txt | 1.0% | 202 | 0.0% | linterDiagnostics |
 | git-diff.txt | 18.0% | 128 | 0.0% | gitDiff |
 | git-log.txt | 54.6% | 983 | 53.6% | gitLog |
 | git-status-porcelain.txt | 0.0% | 74 | 0.0% | gitStatus |
 | go-test-json.txt | 87.4% | 261 | 0.0% | goTestJson |
 | npm-install.txt | 96.9% | 172 | 96.1% | packageManagerSummary |
-| npm-test-failing.txt | 85.8% | 2094 | 0.0% | stripAnsi, stripProgressNoise, summarizeTestRunners |
-| pytest-failing.txt | 54.9% | 2107 | 0.0% | stripProgressNoise, summarizeTestRunners |
+| npm-test-failing.txt | 85.7% | 2084 | 0.0% | stripAnsi, summarizeTestRunners |
+| pytest-failing.txt | 54.9% | 2107 | 0.0% | summarizeTestRunners |
 | pytest-passing.txt | 96.1% | 112 | 94.5% | testRunnerSummary |
-| stacktrace-repeat.txt | 72.5% | 636 | 70.2% | stripProgressNoise, dedupStackTraces |
+| stacktrace-repeat.txt | 72.5% | 616 | 71.1% | dedupStackTraces |
 | tsc.txt | 0.4% | 238 | 0.0% | linterDiagnostics |
-| webpack-build.txt | 0.0% | 2102 | 0.0% | stripProgressNoise |
+| webpack-build.txt | 0.0% | 2102 | 0.0% | none |
 
 Re-read stubs can save roughly 99% when an unchanged file is read again. Dense unique output
 is intentionally left untouched. Savings compound because input tokens are re-sent every turn.
 
 Pairs with [caveman](https://github.com/JuliusBrussee/caveman) (output-side compression):
 caveman makes the model say less, tokenslim makes it *read* less.
+
+## What's new in 0.4.0
+
+- **Breaking: Bash quiet-rewrites are now off by default.** An applied rewrite auto-approves the
+  command and skips Claude Code's permission prompt, so it is opt-in. See [Bash quiet-rewrites](#bash-quiet-rewrites-opt-in).
+- **Lossless grep-shaped grouping** of Bash output, including compound commands and pipelines.
+- **`/tokenslim:budget`** audits the always-on context (skills, MCP servers, agents, hooks, memory) you pay for on every API call.
+- **Replay benchmark:** `node scripts/benchmark.mjs --transcripts <dir>` measures savings on your own transcripts.
+- **Opt-in mid-band Bash cap** (`bash.capChars`) and **opt-in Read guard deny mode** (`readGuard.mode: "deny"`), both with recovery paths.
+- **Honest stats:** `% of attempted` and the cap recovery rate in `/tokenslim:tokenstats`.
+- **Fixed:** `/tokenslim:discover` now honors its arguments (`--since 7 --all` used to arrive as one string and be ignored),
+  and the pipeline no longer alters kept lines containing the literal text `\r` or `\u001b` (e.g. source code with `.replace(/\r\n/g, ...)`).
+  The default tee file limit is now 100 per session (was 20).
 
 ## Install
 
@@ -129,17 +144,19 @@ this checkout).
 
 Five `PostToolUse` matchers cover Bash, Read, Edit|Write, `mcp__.*`, and Grep|Glob,
 replacing tool results with compressed versions before the model ever sees them. Two
-`PreToolUse` matchers add a conservative Bash quiet-flag rewrite and a Read guard. Claude
+`PreToolUse` matchers add an opt-in Bash quiet-flag rewrite and a Read guard. Claude
 Code receives structured `updatedToolOutput`; Codex receives a short `continue: false`
 stop message while the compressed output is added through
 `hookSpecificOutput.additionalContext`:
 
-- **Bash** — before execution, conservatively adds quiet flags to an allowlist of commands
-  without changing the binary (documented in [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md)).
-  After execution, command-aware compressors handle Git, package managers, test runners,
-  linters, and container tables; the generic fallback strips ANSI/progress noise, collapses
-  repeated logs and stack traces, and head+tail truncates only outputs still over 40KB.
-  Failing test names and error text stay **verbatim**.
+- **Bash** — command-aware compressors handle Git, package managers, test runners,
+  linters, and container tables. Grep-shaped output (`rg -n`, `grep -rn`, `-C` context) is
+  regrouped by file, losslessly, from the output text alone, so it also works on compound
+  commands and pipelines where command-aware compressors step aside. The generic fallback
+  strips ANSI/progress noise, collapses repeated logs and stack traces, and head+tail
+  truncates only outputs still over 40KB (or over `bash.capChars` when the opt-in cap is
+  on). Failing test names and error text stay **verbatim**. Quiet-flag rewrites before
+  execution are available but off by default (see below).
 - **Read** — hashes file content per session without changing the first read. Re-reading an
   unchanged file returns a short `[tokenslim] ... unchanged since previous read` stub;
   bounded reads provide an escape hatch when prior context is unavailable.
@@ -153,25 +170,72 @@ stop message while the compressed output is added through
 - **MCP tools** (`mcp__*`) — minifies pretty-printed JSON responses (lossless) and
   truncates base64/data-URI blobs. Optional collapse of huge homogeneous object arrays
   behind `TOKENSLIM_MCP_ARRAYS=1` (off by default — items may be individually load-bearing).
-- **Read guard** (`PreToolUse`) — when a Read targets a file over 2,000 lines with no
-  `offset`/`limit`, injects a non-blocking hint (file size, rough token cost, suggestion to
-  use `offset`/`limit` or Grep). Never blocks the read.
+- **Read guard** (`PreToolUse`) — when a Read targets a file over `readGuard.lines` (default
+  2,000) with no `offset`/`limit`, injects a one-line non-blocking hint (line count, rough
+  token cost, suggestion to use `offset`/`limit` or Grep). Opt-in deny mode holds the read
+  back instead (see below).
 
 Every replacement is marked with a `[tokenslim: ...]` marker so you can always tell what
 was compressed.
 
 ## Commands
 
-- **`/tokenslim:tokenstats`** (Claude Code) — measured savings; supports daily, weekly,
-  monthly, project, graph, JSON/CSV, and top-command views. In Codex run
-  `node /path/to/tokenslim/scripts/stats.mjs --top`.
+- **`/tokenslim:tokenstats`** (Claude Code) — measured savings, including `% of attempted` and
+  the Bash cap recovery rate; supports daily, weekly, monthly, project, graph, JSON/CSV, and
+  top-command views. In Codex run `node /path/to/tokenslim/scripts/stats.mjs --top`.
 - **`/tokenslim:discover`** — read-only scan of Claude transcripts for uncompressed Bash
-  token sinks and missed rewrite opportunities.
+  token sinks and quiet-rewrite opportunities (reported as if rewrites were enabled; they are
+  opt-in). Accepts `--since days`, `--project [path]`/`--all`, `--limit N`, `--format text|json`;
+  arguments are split on whitespace, so a `--project` path with spaces is not supported.
+- **`/tokenslim:budget`** — read-only audit of always-on context overhead; see below.
 - **`/tokenslim:doctor`** — checks Node, hook wiring, scripts, writable data directories,
   active config, disabled features, and runtime detection.
 - **`/tokenslim:slim-memory <file>`** — mechanical CLAUDE.md/rules slimmer: dedups
   redundant rules, strips markdown noise, keeps every directive/path/command byte-identical.
   Shows a preview and asks before writing; original backed up to `<file>.original.md`.
+
+### Context budget (`/tokenslim:budget`)
+
+Skill, agent, MCP-server and hook listings, plus memory files, ride along on every API call
+of a session. `/tokenslim:budget [--since days] [--project [path]|--all] [--min-tokens N]
+[--format text|json] [--emit-settings]` reads your local Claude transcripts (defaults: last 30
+days, current project, 500 tokens) and reports each source by plugin, MCP server, skill, agent,
+hook and memory file, with tokens per session, **weighted tokens**, share of all API-call input,
+and how often it was actually used.
+
+- **Weighted tokens** = an item's size in tokens (chars/4) × the number of API calls that carried
+  it (calls after it appeared, until a later delta removed it). It estimates how much input the item
+  cost, not what it cost in dollars.
+- **Candidates** are items with zero recorded uses and weighted tokens at or above `--min-tokens`.
+- **Prunable** items can be turned off from project settings: plugins via `enabledPlugins` and
+  servers from the project's `.mcp.json` via `disabledMcpjsonServers`. **Manual** items (user-scope MCP
+  servers, claude.ai connectors, user/project skills and agents) have to be changed by you; the report
+  says how. **Built-in** items (built-in tools, agents and skills, MCP instructions, deferred-tool
+  listings) cannot be pruned at all, so the overhead figure is an upper bound.
+- `--emit-settings` only **prints** the JSON snippet for `<project>/.claude/settings.local.json`,
+  plus the manual list. The command never writes any file: when you ask to apply the snippet, Claude
+  shows the diff and asks for explicit confirmation first, merges only into the project's
+  `settings.local.json`, and never edits `~/.claude/settings.json`.
+- Output contains names and sizes only, never prompt, tool, or attachment text.
+
+### Replay benchmark on your own transcripts
+
+```bash
+node scripts/benchmark.mjs --transcripts <dir> [--since N] [--format text|json|md] [--config <file>]
+```
+
+Replays every Bash result in the transcripts under `<dir>` (a Claude `projects` directory, or any
+folder of `.jsonl` transcripts; `--since N` limits to the last N days) through the real Bash hook
+logic as a dry run: nothing is teed, no ledger or state is written. Results that are images,
+already persisted by Claude Code, or already compressed are skipped, and the report breaks savings
+down by rule and command family. Savings are reported as a share of **all** replayed result
+characters, the honest denominator. The **cost-weighted** figure is saved tokens (chars/4) × the API
+calls that came after each compressed result in the same session, i.e. cache-read tokens avoided;
+multiply by your cache-read price for dollars. `--config <file>` applies an explicit tokenslim config
+layer, so you can compare settings (for example `{"bash":{"capChars":8000}}`) without editing your
+configuration; the report also tallies which outputs the cap left alone. Transcripts merge stdout and
+stderr and do not record exit codes, so failure detection falls back to a text heuristic. Without
+`--transcripts` the command prints the fixture benchmark above.
 
 ## Configuration (env vars)
 
@@ -180,10 +244,13 @@ was compressed.
 | `TOKENSLIM_DISABLE` | – | CSV kill switch: `bash`, `read`, `grep`, `edit`, `mcp`, `readguard`, `rewrite`, `tee`, or `all` |
 | `TOKENSLIM_MIN_CHARS` | `500` | Outputs smaller than this pass through untouched |
 | `TOKENSLIM_MCP_ARRAYS` | off | Set to `1` to collapse >50-item homogeneous arrays in MCP JSON results |
-| `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard hint threshold (lines) |
+| `TOKENSLIM_READ_GUARD_MODE` | `advise` | `advise` (one-line hint), `deny` (hold back huge reads, opt-in), or `off` |
+| `TOKENSLIM_READ_GUARD_LINES` | `2000` | Read-guard line threshold (alias for `readGuard.lines`) |
 | `TOKENSLIM_READ_DEFAULT_LINES` | `2000` | Files longer than this are never cache-warmed after Edit/Write (Read would truncate) |
+| `TOKENSLIM_BASH_CAP_CHARS` | `0` (off) | Mid-band Bash output cap in chars (0 or at least 2000); see Configuration files |
 | `TOKENSLIM_TEE_MIN` | `4096` | Minimum original-output bytes before a lossy Bash/MCP result is saved for recovery |
-| `TOKENSLIM_REWRITE_CODEX` | off | Set to `1` to attempt Claude-style Bash input rewriting in Codex; default is advisory only |
+| `TOKENSLIM_REWRITE_ENABLED` | `false` | `true` opts in to Bash quiet-flag rewrites (auto-approves them; see below) |
+| `TOKENSLIM_REWRITE_CODEX` | off | Set to `1` to attempt Claude-style Bash input rewriting in Codex (requires rewrites enabled); default is advisory only |
 
 `TOKENSLIM_HOOK_RUNTIME=claude|codex` forces the Claude/Codex hook-output adapter when
 auto-detection is not enough. `Glob` shares the Grep hook and disable path.
@@ -192,16 +259,78 @@ auto-detection is not enough. `Glob` shares the Grep hook and disable path.
 
 Optional JSON config layers merge in this order: built-in defaults, user
 `$XDG_CONFIG_HOME/tokenslim/config.json` (or `~/.config/...`), project
-`.tokenslim.json`, then environment variables. Malformed files are ignored. The file can
-set `minChars`, `disable`, `readGuardLines`, `readDefaultLines`, `tee` (`enabled`, `mode`, `maxFiles`),
-`rewrite` (`enabled`, `exclude`, `dockerBuild`), and command `filters`. See
-[`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) for rewrite configuration and guards.
+`.tokenslim.json`, then environment variables. Malformed files are ignored. Every key is
+optional; this is the complete set with its defaults:
+
+```json
+{
+  "minChars": 500,
+  "disable": [],
+  "readGuard": { "mode": "advise", "lines": 2000, "bytes": 0 },
+  "readDefaultLines": 2000,
+  "tee": { "enabled": true, "mode": "lossy", "maxFiles": 100 },
+  "bash": { "capChars": 0, "capHeadLines": 60, "capTailLines": 60 },
+  "rewrite": { "enabled": false, "exclude": [], "dockerBuild": false },
+  "filters": []
+}
+```
+
+`readGuardLines` is still accepted as an alias for `readGuard.lines`. Inside one file an explicit
+`readGuard.lines` wins over `readGuardLines`; across layers the later layer wins either way, and
+`TOKENSLIM_READ_GUARD_LINES` overrides both. `tee.maxFiles` is the number of recovery files kept per
+session (0 disables recovery copies). `tee.mode` is `lossy`, `failures` or `never`. `filters` are
+per-command output filters. See [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) for rewrite configuration and guards.
 Project filters control successful-command output, so review `.tokenslim.json` in untrusted
 checkouts.
 
 When lossy Bash or MCP compression exceeds the tee threshold, tokenslim saves the raw
 output under `$XDG_CACHE_HOME/tokenslim/tee/<session>/<tool-use>.log` and includes its
 path in the marker. Set `tee.mode` to `failures` or `never` to restrict recovery copies.
+
+### Bash quiet-rewrites (opt-in)
+
+Off by default since 0.4.0. When enabled, a `PreToolUse` hook appends quiet flags to an allowlist
+of commands (`npm install`, `pip install`, `cargo build`, `pytest`, `git status`, ...) without
+changing the binary. **Warning:** an applied rewrite returns `permissionDecision: "allow"`, which
+auto-approves the rewritten command and bypasses Claude Code's permission prompt for it, and some
+of those commands (package installs, builds) run arbitrary scripts. Enable it only if you accept
+that: `{"rewrite":{"enabled":true}}` or `TOKENSLIM_REWRITE_ENABLED=true`. Rules and guards are in
+[`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md).
+
+### Mid-band Bash cap (opt-in)
+
+The optional cap (`bash.capChars`, off by default; 0 or at least 2000, or env
+`TOKENSLIM_BASH_CAP_CHARS`) keeps the first `capHeadLines` and last `capTailLines` lines (60 each)
+of successful output longer than `capChars`, notes how many lines were omitted (and, for
+grep-shaped output, the omitted matches per file), and points at the recovery copy. It targets the
+8-30KB band that is too small for Claude Code's own persistence of big results. Results Claude
+Code has already persisted (above ~30KB) are always passed through untouched: the hook only sees a
+cut copy of them and the model only sees Claude Code's preview (see `docs/SHAPES.md`).
+
+- It only applies when a recovery copy was actually written, so it never truncates when tee is
+  disabled, below `TOKENSLIM_TEE_MIN`, or in `failures`/`never` mode.
+- Exempt (left whole): diff-shaped output, whole-output JSON, failed commands, and the output of
+  a bounded last stage (`head -n N`, `tail -N`, `sed -n 'a,bp'`, `awk` with `NR`) up to twice the cap.
+- To try it, start with `8000` and watch the cap recovery rate in `/tokenslim:tokenstats`; it
+  counts how often the model went back for the omitted output (reading or `cat`-ing the recovery
+  file, or re-running the command) and flags `⚠` above 15%. You can preview the effect on past
+  sessions with `node scripts/benchmark.mjs --transcripts <dir> --config <file>`.
+
+### Read guard
+
+`readGuard.mode` is `advise` (default), `deny`, or `off`. A Read counts as large when it has no
+`offset`/`limit` and the file has more than `readGuard.lines` lines (default 2000) or, if
+`readGuard.bytes` is above 0, more than that many bytes.
+
+- `advise` injects a one-line hint and lets the full Read run.
+- `deny` (opt-in) refuses the first such Read of a source/config/doc text file and replies with
+  the file size, a regex outline (at most 40 entries, `L<start>-L<end>  <signature>`), and the
+  instruction to re-read with `offset`/`limit`. **Repeating the same unbounded Read is allowed**
+  (once per denial, per session), so a read is delayed by one call, never blocked. Images, PDFs,
+  notebooks, data dumps and other non-text files are never denied (they get the advise hint).
+  Codex falls back to `advise`, because deny is unverified there. Deny only pays off when the model
+  takes the outline's hint, so it stays off until you have compared it on your own work.
+- `off` (or `TOKENSLIM_DISABLE=readguard`) disables the guard.
 
 ### Privacy and local storage
 
@@ -212,7 +341,7 @@ Analytics retain only command
 families such as `git status`, never command arguments, URLs, headers, credentials, or inline
 environment values. Project paths remain in local history for project reports. Recovery logs
 contain the original raw output and may therefore contain sensitive data; disable them with
-`TOKENSLIM_DISABLE=tee` or `tee.mode: "never"`. See [`SECURITY.md`](SECURITY.md) for storage
+`TOKENSLIM_DISABLE=tee` or `tee.mode: "never"` (note that the Bash cap then never applies). See [`SECURITY.md`](SECURITY.md) for storage
 locations, permissions, and the Bash rewrite trust boundary.
 
 ## Design guarantees
@@ -235,8 +364,8 @@ locations, permissions, and the Bash rewrite trust boundary.
 ## Compared with RTK
 
 RTK proxies Bash through an external binary and has a larger command registry. tokenslim
-uses no binary or dependencies, prevents selected Bash noise with an in-place rewrite,
-then applies command-aware and generic compression to Bash **and** native Read, Grep/Glob,
+uses no binary or dependencies, can (opt-in) prevent selected Bash noise with an in-place rewrite,
+and applies command-aware, shape-based, and generic compression to Bash **and** native Read, Grep/Glob,
 Edit/Write cache warming, and MCP results. It also provides recovery copies, JSON-based
 cross-session reporting, transcript discovery, and an installation doctor. Neither tool
 can guarantee a particular reduction: tokenslim passes dense or low-savings output through
@@ -263,6 +392,15 @@ Each hook records bytes-in/bytes-out to a per-session ledger at
 ~3 chars/token (code-like content); cost estimates use
 $3/MTok input pricing — both assumptions are documented in the code.
 
+The Bash, Read, Grep/Glob and MCP hooks also record the bytes of every result that reached their
+size check (images and PDFs excluded), so stats report `% of attempted` per tool and in total
+rather than only a share of what was compressed. When the Bash cap is enabled, stats add a recovery
+rate: the share of capped outputs the model later re-fetched (recovery-file read or `cat`, or the
+same command re-run), flagged `⚠` above 15%. Re-run detection keeps only hashes of the last three
+commands, never command text. Savings multiplied by the API calls still to come cannot be known
+inside a hook; `node scripts/benchmark.mjs --transcripts <dir>` computes that cost-weighted figure
+offline.
+
 ## Research this is built on
 
 - **LLMLingua / LLMLingua-2 / LongLLMLingua** (Microsoft) — token-pruning literature;
@@ -287,9 +425,12 @@ node --test tests/*.test.mjs   # test suite: rules, determinism, fail-open, rele
 Repo layout: `scripts/lib/pipeline.mjs` (pure compression rules), `scripts/lib/state.mjs`
 (ledger + read cache), `scripts/lib/read-format.mjs` (shared Read text/hash helpers),
 `scripts/compress-{bash,read,grep,edit,mcp}.mjs`, `scripts/rewrite-bash.mjs`, and
-`scripts/guard-read.mjs` (hook entrypoints), `scripts/lib/cmd-compressors/` (specialized
-Bash compressors), `hooks/hooks.json` (wiring), `docs/` (contracts and operational notes),
-and `scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
+`scripts/guard-read.mjs` (hook entrypoints), `scripts/lib/bash-hook.mjs` (Bash hook core, also
+used by the replay), `scripts/lib/cmd-compressors/` and `scripts/lib/shape-compressors/`
+(command-aware and output-shape Bash compressors), `scripts/lib/outline.mjs` (deny-mode outlines),
+`scripts/budget.mjs` with `scripts/lib/budget.mjs`, `scripts/lib/transcripts.mjs` (shared transcript
+walker), `hooks/hooks.json` (wiring), `docs/` (contracts and operational notes; `docs/history/`
+holds archived plans), and `scripts/lib/hook-output.mjs` (Claude/Codex hook response adapter).
 
 ## FAQ
 

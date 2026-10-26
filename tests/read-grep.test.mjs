@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, readFileSync as fsReadFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './helpers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const READ_SCRIPT = join(__dirname, '..', 'scripts', 'compress-read.mjs');
@@ -13,12 +14,14 @@ const FIXTURE_SOURCE = join(__dirname, 'fixtures', 'read', 'source-with-blanks.j
 const FIXTURE_GREP = join(__dirname, 'fixtures', 'read', 'large-grep-output.txt');
 
 function run(script, payload, extraEnv = {}) {
-  const result = spawnSync('node', [script], {
-    input: JSON.stringify(payload),
-    encoding: 'utf8',
-    env: { ...process.env, ...extraEnv },
-  });
-  return result;
+  const iso = isolatedEnv(extraEnv);
+  try {
+    return spawnSync('node', [script], {
+      input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+      encoding: 'utf8',
+      env: iso.env,
+    });
+  } finally { iso.cleanup(); }
 }
 
 function parseOutput(result) {
@@ -185,11 +188,7 @@ test('Read: unrecognized shape passes through silently', () => {
 test('Read: garbage stdin fails open', () => {
   withTempCache((cacheDir) => {
     const result = run(READ_SCRIPT, undefined, { XDG_CACHE_HOME: cacheDir });
-    const raw = spawnSync('node', [READ_SCRIPT], {
-      input: 'not json at all {{{',
-      encoding: 'utf8',
-      env: { ...process.env, XDG_CACHE_HOME: cacheDir },
-    });
+    const raw = run(READ_SCRIPT, 'not json at all {{{', { XDG_CACHE_HOME: cacheDir });
     assert.equal(raw.status, 0);
     assert.equal(raw.stdout, '');
   });
@@ -356,11 +355,7 @@ test('Grep: below-threshold savings pass through with no output', () => {
 
 test('Grep: garbage stdin fails open', () => {
   withTempCache((cacheDir) => {
-    const raw = spawnSync('node', [GREP_SCRIPT], {
-      input: '{{{ not json',
-      encoding: 'utf8',
-      env: { ...process.env, XDG_CACHE_HOME: cacheDir },
-    });
+    const raw = run(GREP_SCRIPT, '{{{ not json', { XDG_CACHE_HOME: cacheDir });
     assert.equal(raw.status, 0);
     assert.equal(raw.stdout, '');
   });

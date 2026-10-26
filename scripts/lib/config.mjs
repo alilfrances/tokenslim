@@ -7,10 +7,15 @@ import { recordDiagnostic } from './state.mjs';
 export const DEFAULT_CONFIG = Object.freeze({
   minChars: 500,
   disable: [],
+  // readGuardLines is a legacy alias kept in sync with readGuard.lines (see merge()).
   readGuardLines: 2000,
+  // mode: advise (one-line hint) | deny (opt-in, outline + one-shot escape hatch) | off. bytes 0 = unused.
+  readGuard: { mode: 'advise', lines: 2000, bytes: 0 },
   readDefaultLines: 2000,
-  tee: { enabled: true, mode: 'lossy', maxFiles: 20 },
-  rewrite: { enabled: true, exclude: [], dockerBuild: false },
+  tee: { enabled: true, mode: 'lossy', maxFiles: 100 },
+  // capChars 0 = off. Opt-in mid-band cap: keeps capHeadLines/capTailLines and writes a recovery tee (see bash-hook).
+  bash: { capChars: 0, capHeadLines: 60, capTailLines: 60 },
+  rewrite: { enabled: false, exclude: [], dockerBuild: false },
   filters: [],
 });
 
@@ -42,12 +47,24 @@ function validFilter(value) {
   return filter;
 }
 
+// 0 disables the cap; anything smaller than 2000 chars would truncate ordinary short output.
+const validCapChars = (value) => Number.isInteger(value) && (value === 0 || value >= 2000);
+const READ_GUARD_MODES = ['advise', 'deny', 'off'];
+
 function validLayer(value) {
   if (!plainObject(value)) return null;
   const layer = {};
   if (Number.isFinite(value.minChars) && value.minChars >= 0) layer.minChars = value.minChars;
   if (Array.isArray(value.disable) && value.disable.every((item) => typeof item === 'string')) layer.disable = value.disable;
-  if (Number.isFinite(value.readGuardLines) && value.readGuardLines >= 0) layer.readGuardLines = value.readGuardLines;
+  // Alias precedence within one layer: an explicit readGuard.lines beats readGuardLines. Across layers the later layer wins either way.
+  if (Number.isFinite(value.readGuardLines) && value.readGuardLines >= 0) layer.readGuard = { lines: value.readGuardLines };
+  if (plainObject(value.readGuard)) {
+    const readGuard = { ...(layer.readGuard || {}) };
+    if (READ_GUARD_MODES.includes(value.readGuard.mode)) readGuard.mode = value.readGuard.mode;
+    if (Number.isFinite(value.readGuard.lines) && value.readGuard.lines >= 0) readGuard.lines = value.readGuard.lines;
+    if (Number.isFinite(value.readGuard.bytes) && value.readGuard.bytes >= 0) readGuard.bytes = value.readGuard.bytes;
+    if (Object.keys(readGuard).length) layer.readGuard = readGuard;
+  }
   if (Number.isFinite(value.readDefaultLines) && value.readDefaultLines >= 0) layer.readDefaultLines = value.readDefaultLines;
   if (plainObject(value.tee)) {
     const tee = {};
@@ -55,6 +72,14 @@ function validLayer(value) {
     if (['lossy', 'failures', 'never'].includes(value.tee.mode)) tee.mode = value.tee.mode;
     if (Number.isFinite(value.tee.maxFiles) && value.tee.maxFiles >= 0) tee.maxFiles = value.tee.maxFiles;
     if (Object.keys(tee).length) layer.tee = tee;
+  }
+  if (plainObject(value.bash)) {
+    const bash = {};
+    if (validCapChars(value.bash.capChars)) bash.capChars = value.bash.capChars;
+    for (const key of ['capHeadLines', 'capTailLines']) {
+      if (Number.isInteger(value.bash[key]) && value.bash[key] >= 0) bash[key] = value.bash[key];
+    }
+    if (Object.keys(bash).length) layer.bash = bash;
   }
   if (plainObject(value.rewrite)) {
     const rewrite = {};
@@ -82,10 +107,22 @@ function readLayer(path) {
   }
 }
 
+/** Load one explicit config file through the same validation as the file layers; unlike them it throws on a missing or malformed file. */
+export function loadConfigLayerFile(path) {
+  const layer = validLayer(JSON.parse(readFileSync(path, 'utf8')));
+  if (!layer) throw new Error('config must be a JSON object');
+  return layer;
+}
+
+export function mergeConfigLayer(base, layer) {
+  return merge(clone(base), layer);
+}
+
 function merge(base, layer) {
   if (!layer) return base;
   const next = { ...base, ...layer };
-  for (const key of ['tee', 'rewrite']) next[key] = { ...base[key], ...(layer[key] || {}) };
+  for (const key of ['tee', 'rewrite', 'bash', 'readGuard']) next[key] = { ...base[key], ...(layer[key] || {}) };
+  if (next.readGuard.lines !== undefined) next.readGuardLines = next.readGuard.lines;
   return next;
 }
 
@@ -99,10 +136,18 @@ function envLayer(env) {
   const readGuardLines = number('TOKENSLIM_READ_GUARD_LINES');
   const readDefaultLines = number('TOKENSLIM_READ_DEFAULT_LINES');
   if (minChars !== undefined) layer.minChars = minChars;
-  if (readGuardLines !== undefined) layer.readGuardLines = readGuardLines;
+  if (readGuardLines !== undefined) layer.readGuard = { lines: readGuardLines };
+  if (typeof env.TOKENSLIM_READ_GUARD_MODE === 'string') {
+    const mode = env.TOKENSLIM_READ_GUARD_MODE.trim().toLowerCase();
+    if (READ_GUARD_MODES.includes(mode)) layer.readGuard = { ...(layer.readGuard || {}), mode };
+  }
   if (readDefaultLines !== undefined) layer.readDefaultLines = readDefaultLines;
   if (typeof env.TOKENSLIM_DISABLE === 'string') {
     layer.disable = env.TOKENSLIM_DISABLE.split(',').map((part) => part.trim()).filter(Boolean);
+  }
+  if (typeof env.TOKENSLIM_BASH_CAP_CHARS === 'string' && env.TOKENSLIM_BASH_CAP_CHARS.trim() !== '') {
+    const value = Number(env.TOKENSLIM_BASH_CAP_CHARS);
+    if (validCapChars(value)) layer.bash = { ...(layer.bash || {}), capChars: value };
   }
   if (typeof env.TOKENSLIM_REWRITE_ENABLED === 'string') {
     const value = env.TOKENSLIM_REWRITE_ENABLED.toLowerCase();
@@ -123,7 +168,7 @@ export function loadConfig(cwd = process.cwd(), env = process.env) {
   const configHome = env.XDG_CONFIG_HOME || join(home, '.config');
   const projectPath = join(resolve(cwd), '.tokenslim.json');
   const globalPath = join(configHome, 'tokenslim', 'config.json');
-  const key = JSON.stringify([projectPath, globalPath, env.TOKENSLIM_MIN_CHARS, env.TOKENSLIM_READ_GUARD_LINES, env.TOKENSLIM_READ_DEFAULT_LINES, env.TOKENSLIM_DISABLE, env.TOKENSLIM_REWRITE_ENABLED, env.TOKENSLIM_REWRITE_EXCLUDE, env.TOKENSLIM_REWRITE_DOCKER_BUILD]);
+  const key = JSON.stringify([projectPath, globalPath, env.TOKENSLIM_MIN_CHARS, env.TOKENSLIM_READ_GUARD_LINES, env.TOKENSLIM_READ_GUARD_MODE, env.TOKENSLIM_READ_DEFAULT_LINES, env.TOKENSLIM_DISABLE, env.TOKENSLIM_REWRITE_ENABLED, env.TOKENSLIM_REWRITE_EXCLUDE, env.TOKENSLIM_REWRITE_DOCKER_BUILD, env.TOKENSLIM_BASH_CAP_CHARS]);
   if (cache.has(key)) return clone(cache.get(key));
   let config = clone(DEFAULT_CONFIG);
   config = merge(config, readLayer(globalPath));

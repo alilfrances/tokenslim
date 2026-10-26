@@ -1,0 +1,396 @@
+{
+  "bash/cargo-build.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "packageManagerSummary"
+    ],
+    "bytesIn": 2091,
+    "bytesOut": 206,
+    "recoveryPath": null,
+    "sha256": "149f623e600ec63bc21d07170ef00937aef07931e53b0226c23df7d6a6244620"
+  },
+  "bash/cargo-build.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "packageManagerSummary"
+    ],
+    "bytesIn": 2091,
+    "bytesOut": 231,
+    "recoveryPath": "<tee>",
+    "sha256": "c42a58918f0cd8708da3e2d7d80fc76e3872791ab73070b2b5ccd4c602c882ea"
+  },
+  "bash/docker-ps.txt": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 232,
+    "bytesOut": 232,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/docker-ps.txt (tee)": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 232,
+    "bytesOut": 232,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/docker-pull.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "stripProgressNoise",
+      "collapseRepeatedLines"
+    ],
+    "bytesIn": 2277,
+    "bytesOut": 351,
+    "recoveryPath": null,
+    "sha256": "f4c819c7d6bd9dc4e4c4703bfea17ad923aee14e827fe8f79f8e100627c6df61"
+  },
+  "bash/docker-pull.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "stripProgressNoise",
+      "collapseRepeatedLines"
+    ],
+    "bytesIn": 2277,
+    "bytesOut": 376,
+    "recoveryPath": "<tee>",
+    "sha256": "a9de5eaa5c1a21f65516f2d81680456e3ae39cf8903999f22679f9997701d8c0"
+  },
+  "bash/eslint.txt": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 202,
+    "bytesOut": 202,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/eslint.txt (tee)": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 202,
+    "bytesOut": 202,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/git-diff.txt": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 128,
+    "bytesOut": 128,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/git-diff.txt (tee)": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 128,
+    "bytesOut": 128,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/git-log.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "gitLog"
+    ],
+    "bytesIn": 2120,
+    "bytesOut": 983,
+    "recoveryPath": null,
+    "sha256": "51e61cd0af49e63f3e6a4f6318028709214cbda109a92ad0eb275ac4d712c69c"
+  },
+  "bash/git-log.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "gitLog"
+    ],
+    "bytesIn": 2120,
+    "bytesOut": 1008,
+    "recoveryPath": "<tee>",
+    "sha256": "71eed6e3c9cae44f1f9056575987d90894246fa26f51c107d2a8bf9d6de26290"
+  },
+  "bash/git-status-porcelain.txt": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 74,
+    "bytesOut": 74,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/git-status-porcelain.txt (tee)": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 74,
+    "bytesOut": 74,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/go-test-json.txt": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 261,
+    "bytesOut": 261,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/go-test-json.txt (tee)": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 261,
+    "bytesOut": 261,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/npm-install.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "packageManagerSummary"
+    ],
+    "bytesIn": 4391,
+    "bytesOut": 172,
+    "recoveryPath": null,
+    "sha256": "d41f1964ae39b7e8c451b74377fe453a405334733aa5415da966ee01de52a809"
+  },
+  "bash/npm-install.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "packageManagerSummary"
+    ],
+    "bytesIn": 4391,
+    "bytesOut": 197,
+    "recoveryPath": "<tee>",
+    "sha256": "81afe8c83f4e76d5e74898020be4862be98d3b4fb29a11fea2d5528ae91e7b2c"
+  },
+  "bash/npm-test-failing.txt": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2084,
+    "bytesOut": 2084,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/npm-test-failing.txt (tee)": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2084,
+    "bytesOut": 2084,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/pytest-failing.txt": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2107,
+    "bytesOut": 2107,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/pytest-failing.txt (tee)": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2107,
+    "bytesOut": 2107,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/pytest-passing.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "testRunnerSummary"
+    ],
+    "bytesIn": 2053,
+    "bytesOut": 112,
+    "recoveryPath": null,
+    "sha256": "f64ac01056d830325778597ede5030e11b353a45b8773a946f1210e947b29851"
+  },
+  "bash/pytest-passing.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "testRunnerSummary"
+    ],
+    "bytesIn": 2053,
+    "bytesOut": 137,
+    "recoveryPath": "<tee>",
+    "sha256": "d8a6bd599a40cb6b5c2b4f20531ab8e1c7448094318d6a5b5ac38136133a0ea7"
+  },
+  "bash/stacktrace-repeat.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "dedupStackTraces"
+    ],
+    "bytesIn": 2133,
+    "bytesOut": 616,
+    "recoveryPath": null,
+    "sha256": "83bd339d567c3a216b4d0ba2afa68622cfd220c7910979d454e1649e7b5e816a"
+  },
+  "bash/stacktrace-repeat.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "dedupStackTraces"
+    ],
+    "bytesIn": 2133,
+    "bytesOut": 641,
+    "recoveryPath": "<tee>",
+    "sha256": "723f0158d17c3881e7ccf94426bb3357a01ef62b7fe444f51e3d44291cfe84f3"
+  },
+  "bash/tsc.txt": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 238,
+    "bytesOut": 238,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/tsc.txt (tee)": {
+    "outcome": "skippedBelowThreshold",
+    "rulesApplied": [],
+    "bytesIn": 238,
+    "bytesOut": 238,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/webpack-build.txt": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 2102,
+    "bytesOut": 2102,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/webpack-build.txt (tee)": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 2102,
+    "bytesOut": 2102,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "shape/grep-context.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "groupByPath"
+    ],
+    "bytesIn": 4927,
+    "bytesOut": 3693,
+    "recoveryPath": null,
+    "sha256": "8b31f7bc823175b49a3d7bd748da2e31d5008ac663ebd13dd5a43db9524c9f27"
+  },
+  "shape/grep-context.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "groupByPath"
+    ],
+    "bytesIn": 4927,
+    "bytesOut": 3693,
+    "recoveryPath": null,
+    "sha256": "8b31f7bc823175b49a3d7bd748da2e31d5008ac663ebd13dd5a43db9524c9f27"
+  },
+  "shape/grep-rn.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "groupByPath"
+    ],
+    "bytesIn": 5683,
+    "bytesOut": 4627,
+    "recoveryPath": null,
+    "sha256": "fe430e85d448b1314a5647587b96b4f065c91ebad7530687deab5971e9cea87b"
+  },
+  "shape/grep-rn.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "groupByPath"
+    ],
+    "bytesIn": 5683,
+    "bytesOut": 4627,
+    "recoveryPath": null,
+    "sha256": "fe430e85d448b1314a5647587b96b4f065c91ebad7530687deab5971e9cea87b"
+  },
+  "shape/rg-n.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "groupByPath"
+    ],
+    "bytesIn": 5100,
+    "bytesOut": 4308,
+    "recoveryPath": null,
+    "sha256": "8f0937ac25d6fe864f9428aebba2ee47be9f442b18620cc6b15baf0e96930be1"
+  },
+  "shape/rg-n.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "groupByPath"
+    ],
+    "bytesIn": 5100,
+    "bytesOut": 4308,
+    "recoveryPath": null,
+    "sha256": "8f0937ac25d6fe864f9428aebba2ee47be9f442b18620cc6b15baf0e96930be1"
+  },
+  "synthetic/mid-band-20k": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 16318,
+    "bytesOut": 16318,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "synthetic/mid-band-20k (tee)": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 16318,
+    "bytesOut": 16318,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "synthetic/above-40k": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "headTailTruncate"
+    ],
+    "bytesIn": 83721,
+    "bytesOut": 13376,
+    "recoveryPath": null,
+    "sha256": "51e28d648810c0999e26dccc2f80b5e81141a854c349e85d6384c25c0cc30ae1"
+  },
+  "synthetic/above-40k (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "headTailTruncate"
+    ],
+    "bytesIn": 83721,
+    "bytesOut": 13401,
+    "recoveryPath": "<tee>",
+    "sha256": "f6c43e72d3f5ab9fba70aef48d6ed3b39b4917bed236e880e57c399797acaf7e"
+  },
+  "synthetic/head-pipe": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 16318,
+    "bytesOut": 16318,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "synthetic/head-pipe (tee)": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 16318,
+    "bytesOut": 16318,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "synthetic/stderr": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 12248,
+    "bytesOut": 12248,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "synthetic/stderr (tee)": {
+    "outcome": "skippedPoorRatio",
+    "rulesApplied": [],
+    "bytesIn": 12248,
+    "bytesOut": 12248,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  }
+}

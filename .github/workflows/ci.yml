@@ -34,7 +34,8 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Syntax check scripts
-        run: node --check scripts/*.mjs scripts/lib/*.mjs
+        # node --check takes one file; extra args become argv and are never checked.
+        run: for f in scripts/*.mjs scripts/lib/*.mjs scripts/lib/*/*.mjs; do node --check "$f" || exit 1; done
 
       - name: Validate release versions
         run: node scripts/validate-release-version.mjs

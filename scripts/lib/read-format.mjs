@@ -45,6 +45,20 @@ export function locateText(toolResponse) {
   return null;
 }
 
+// Image and PDF results are binary payloads, not text tokens: they never count toward attempted bytes.
+export function isMediaResponse(toolResponse) {
+  if (!toolResponse || typeof toolResponse !== 'object') return false;
+  if (Array.isArray(toolResponse)) return toolResponse.some((block) => isMediaResponse(block));
+  const kind = String(toolResponse.type || '');
+  if (toolResponse.isImage === true || kind === 'image' || kind === 'pdf') return true;
+  const file = toolResponse.file;
+  if (file && typeof file === 'object') {
+    const mime = String(file.type || file.mediaType || file.media_type || '');
+    if (/^image\//.test(mime) || mime === 'application/pdf' || typeof file.base64 === 'string') return true;
+  }
+  return false;
+}
+
 export function sha256(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }

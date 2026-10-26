@@ -47,11 +47,12 @@ privacy-safe command families rather than full transcript command lines.
 
 ## Bash Rewrite Trust Boundary
 
-The Claude PreToolUse rewrite hook returns `permissionDecision: "allow"` only for its documented
-same-binary allowlist. It declines shell operators, redirections, command substitution,
+The Claude PreToolUse rewrite hook is **off by default** (since 0.4.0) because an applied rewrite
+returns `permissionDecision: "allow"`, which auto-approves the command and skips the permission prompt.
+When opted in (`rewrite.enabled`), it does so only for its documented same-binary allowlist. It declines shell operators, redirections, command substitution,
 newlines, argument separators, explicit verbosity, and malformed quoting. Review
 [`docs/REWRITE-RULES.md`](docs/REWRITE-RULES.md) before enabling the plugin in an untrusted
-project. Rewriting can be disabled with `TOKENSLIM_DISABLE=rewrite`.
+project. Rewriting stays disabled unless `rewrite.enabled` is set, and `TOKENSLIM_DISABLE=rewrite` turns it off even then.
 
 Project-local `.tokenslim.json` files are parsed defensively: size and filter counts are
 bounded, unknown fields are discarded, and regular expressions are length-limited and

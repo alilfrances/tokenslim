@@ -1,10 +1,11 @@
 // Best-effort recovery copies for output where compression drops information.
 import { chmodSync, closeSync, constants, fchmodSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 const DEFAULT_MIN_BYTES = 4096;
-const DEFAULT_MAX_FILES = 20;
+// Pruning deletes the oldest file a marker may still point to, so keep enough history for a long session.
+const DEFAULT_MAX_FILES = 100;
 
 function stableId(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return null;
@@ -14,13 +15,24 @@ function stableId(value) {
   return id ? encodeURIComponent(id).replace(/\./g, '%2E') : null;
 }
 
+export function teeRoot(env = process.env) {
+  const home = env.HOME || homedir();
+  const cacheHome = env.XDG_CACHE_HOME || join(home, '.cache');
+  return join(cacheHome, 'tokenslim', 'tee');
+}
+
 export function teePath(sessionId, toolUseId, env = process.env) {
   const session = stableId(sessionId);
   const toolUse = stableId(toolUseId);
   if (!session || !toolUse) return null;
-  const home = env.HOME || homedir();
-  const cacheHome = env.XDG_CACHE_HOME || join(home, '.cache');
-  return join(cacheHome, 'tokenslim', 'tee', session, `${toolUse}.log`);
+  return join(teeRoot(env), session, `${toolUse}.log`);
+}
+
+// True when a file path lies inside the tee root (a recovery read). Pure string check; touches no files.
+export function isTeePath(filePath, env = process.env) {
+  if (typeof filePath !== 'string' || !filePath) return false;
+  // resolve() collapses `..`, so a path that merely starts with the root cannot escape it.
+  return resolve(filePath).startsWith(resolve(teeRoot(env)) + sep);
 }
 
 export function teeMinBytes(env = process.env) {
@@ -46,6 +58,23 @@ function prune(sessionDirectory, maxFiles) {
   for (const file of files.slice(maxFiles)) rmSync(file.path, { force: true });
 }
 
+// Every condition that does not depend on filesystem state or ids. Shared with replay, which has no session to write for
+// but must still agree with the real hook on whether a recovery copy would be written.
+function teeGate(text, { config, env, lossy, failed }) {
+  if (!lossy || !teeEnabled(config, env)) return false;
+  const mode = config?.tee?.mode || 'lossy';
+  if (mode === 'failures' && !failed) return false;
+  if (mode !== 'lossy' && mode !== 'failures') return false;
+  if (Buffer.byteLength(String(text ?? ''), 'utf8') < teeMinBytes(env)) return false;
+  const maxFiles = Number.isFinite(config?.tee?.maxFiles) ? config.tee.maxFiles : DEFAULT_MAX_FILES;
+  return maxFiles > 0;
+}
+
+/** Whether teeOriginalOutput would be allowed to write (ignoring ids and I/O errors). Writes nothing. */
+export function teeWouldWrite(text, { config = {}, env = process.env, lossy = false, failed = false } = {}) {
+  return teeGate(text, { config, env, lossy, failed });
+}
+
 // Never throw: recovery is optional and must not affect compression availability.
 export function teeOriginalOutput(text, {
   sessionId,
@@ -56,14 +85,10 @@ export function teeOriginalOutput(text, {
   failed = false,
 } = {}) {
   try {
-    if (!lossy || !teeEnabled(config, env)) return null;
-    const mode = config?.tee?.mode || 'lossy';
-    if (mode === 'failures' && !failed) return null;
-    if (mode !== 'lossy' && mode !== 'failures') return null;
-    if (Buffer.byteLength(String(text ?? ''), 'utf8') < teeMinBytes(env)) return null;
+    if (!teeGate(text, { config, env, lossy, failed })) return null;
     const path = teePath(sessionId, toolUseId, env);
     const maxFiles = Number.isFinite(config?.tee?.maxFiles) ? config.tee.maxFiles : DEFAULT_MAX_FILES;
-    if (!path || maxFiles <= 0) return null;
+    if (!path) return null;
     const directory = join(path, '..');
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     if (lstatSync(directory).isSymbolicLink()) return null;

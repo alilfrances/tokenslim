@@ -113,3 +113,25 @@ results in `filenames` — those are already compact; pass through.
 No single text field. Compression = shorten the `filenames` string array (grouped
 summaries are still strings, shape stays valid). `durationMs` is nondeterministic — copy
 verbatim, never synthesize.
+
+## PostToolUse vs native output persistence (verified, Claude Code 2.1.310)
+
+Claude Code persists large Bash results itself **before** `PostToolUse` hooks run. Probe: a
+project-level `PostToolUse` Bash hook that logs `tool_response` and returns `updatedToolOutput`
+with stdout replaced by `"PROBE " + stdout.length`, driven by `claude -p`:
+
+| Command output | Hook saw | Model saw (transcript `tool_result`) |
+| --- | --- | --- |
+| 20,000 chars | full stdout (20,000); keys `stdout, stderr, interrupted, isImage, noOutputExpected` | `PROBE 20000` (replacement applied inline) |
+| 60,001 chars | stdout **cut to 30,000 chars**, plus `persistedOutputPath` and `persistedOutputSize` | `<persisted-output>` block: "Output too large (58.6KB). Full output saved to: …", with a 2KB preview of the hook's replacement |
+
+Consequences for tokenslim:
+
+- Replacement works for everything below the persistence threshold, so the mid-band cap
+  (`bash.capChars`, 8-30KB) is effective.
+- For persisted results the hook only has a truncated copy and the model only sees a preview,
+  so the Bash hook passes them through untouched (`skippedPersisted`): no compression, no tee
+  of the cut copy, and no "attempted" bytes. Claude Code's own saved file is the recovery path.
+- The generic 40,000-char `headTailTruncate` fallback can no longer trigger on Bash output (the
+  hook never receives more than 30,000 chars); it stays as a harmless backstop.
+- Offline replay (`benchmark --transcripts`) already skips `<persisted-output>` results.

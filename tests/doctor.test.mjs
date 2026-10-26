@@ -4,9 +4,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { isolatedEnv } from './helpers.mjs';
 
 const root = join(import.meta.dirname, '..');
-function run(args = [], env = {}) { return spawnSync('node', ['scripts/doctor.mjs', ...args], { cwd: root, env: { ...process.env, ...env }, encoding: 'utf8' }); }
+function run(args = [], env = {}) {
+  const iso = isolatedEnv(env);
+  try { return spawnSync('node', ['scripts/doctor.mjs', ...args], { cwd: root, env: iso.env, encoding: 'utf8' }); } finally { iso.cleanup(); }
+}
 
 test('doctor reports this checkout healthy', () => {
   const dir = mkdtempSync(join(tmpdir(), 'tokenslim-doctor-'));

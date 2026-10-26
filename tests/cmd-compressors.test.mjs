@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './helpers.mjs';
 import { commandMeta, compressCommandOutput } from '../scripts/lib/cmd-compressors/index.mjs';
 import { FAILURE_RE, hasFailure } from '../scripts/lib/cmd-compressors/shared.mjs';
 import { compressBashOutput } from '../scripts/lib/pipeline.mjs';
@@ -144,26 +145,30 @@ test('failure output is never command-compressed', () => {
 
 test('Bash entrypoint marks specialized compression and applies the ratio floor after marking', async () => {
   const cacheRoot = mkdtempSync(join(tmpdir(), 'tokenslim-cmd-entry-'));
-  const run = (command, toolResponse) => spawnSync(process.execPath, [join(import.meta.dirname, '..', 'scripts', 'compress-bash.mjs')], {
-    cwd: join(import.meta.dirname, '..'),
-    input: JSON.stringify({
-      session_id: 'cmd-entry',
-      cwd: join(import.meta.dirname, '..'),
-      hook_event_name: 'PostToolUse',
-      tool_name: 'Bash',
-      tool_input: { command },
-      tool_response: toolResponse,
-      tool_use_id: 'cmd-entry-tool',
-    }),
-    encoding: 'utf8',
-    env: {
-      ...process.env,
+  const run = (command, toolResponse) => {
+    const iso = isolatedEnv({
       XDG_CACHE_HOME: cacheRoot,
       TOKENSLIM_HOOK_RUNTIME: 'claude',
       TOKENSLIM_MIN_CHARS: '1',
       TOKENSLIM_TEE_MIN: String(Number.MAX_SAFE_INTEGER),
-    },
-  });
+    });
+    try {
+      return spawnSync(process.execPath, [join(import.meta.dirname, '..', 'scripts', 'compress-bash.mjs')], {
+        cwd: join(import.meta.dirname, '..'),
+        input: JSON.stringify({
+          session_id: 'cmd-entry',
+          cwd: join(import.meta.dirname, '..'),
+          hook_event_name: 'PostToolUse',
+          tool_name: 'Bash',
+          tool_input: { command },
+          tool_response: toolResponse,
+          tool_use_id: 'cmd-entry-tool',
+        }),
+        encoding: 'utf8',
+        env: iso.env,
+      });
+    } finally { iso.cleanup(); }
+  };
 
   try {
     const pytest = run('pytest', await fixture('pytest-passing.txt'));

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './helpers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -37,14 +38,16 @@ test('Codex marketplace points at the plugin root', () => {
   assert.equal(entry.category, 'Developer Tools');
 });
 
-test('hook commands prefer Claude root, then Codex root, then local root', () => {
+test('hook commands prefer Claude root, then Codex root, then local root', (t) => {
   const hooks = readJson('hooks/hooks.json');
   assert.ok(hooks.hooks.PostToolUse.some((group) => group.matcher === 'Edit|Write'));
   assert.ok(hooks.hooks.PostToolUse.some((group) => group.matcher === 'mcp__.*'));
   assert.ok(hooks.hooks.PreToolUse.some((group) => group.matcher === 'Read'));
   assert.ok(hooks.hooks.PreToolUse.some((group) => group.matcher === 'Bash'));
   const groups = Object.values(hooks.hooks).flat().flatMap((group) => group.hooks);
-  const env = { ...process.env };
+  const iso = isolatedEnv();
+  t.after(iso.cleanup);
+  const env = iso.env;
   delete env.PLUGIN_ROOT;
   delete env.CLAUDE_PLUGIN_ROOT;
   delete env.CODEX_PLUGIN_ROOT;
@@ -81,7 +84,7 @@ test('hook commands prefer Claude root, then Codex root, then local root', () =>
   }
 });
 
-test('tokenstats command resolves the plugin root outside the project directory', () => {
+test('tokenstats command resolves the plugin root outside the project directory', (t) => {
   const command = readFileSync(join(root, 'commands', 'tokenstats.md'), 'utf8');
   const match = command.match(/!`([^`]+)`/);
 
@@ -89,7 +92,9 @@ test('tokenstats command resolves the plugin root outside the project directory'
   assert.doesNotMatch(command, /\$\{[^}]+}/);
   assert.doesNotMatch(command, /CODEX_PLUGIN_ROOT/);
 
-  const env = { ...process.env, TOKENSLIM_PLUGIN_ROOT: root };
+  const iso = isolatedEnv({ TOKENSLIM_PLUGIN_ROOT: root });
+  t.after(iso.cleanup);
+  const env = iso.env;
   delete env.PLUGIN_ROOT;
   delete env.CLAUDE_PLUGIN_ROOT;
   delete env.CODEX_PLUGIN_ROOT;
@@ -101,5 +106,5 @@ test('tokenstats command resolves the plugin root outside the project directory'
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /tokenslim (savings|: no savings recorded)/);
+  assert.match(result.stdout, /tokenslim( savings|: no savings recorded)/);
 });

@@ -1,0 +1,49 @@
+tests/tee.test.mjs:6:import { appendTeePath, teeOriginalOutput, teePath } from '../scripts/lib/tee.mjs';
+tests/tee.test.mjs:9:  const cache = mkdtempSync(join(tmpdir(), 'tokenslim-tee-'));
+tests/tee.test.mjs:13:const config = { tee: { enabled: true, mode: 'lossy', maxFiles: 20 } };
+tests/tee.test.mjs:15:test('tees lossy output at a stable path and inserts that path into a marker', () => withCache((cache) => {
+tests/tee.test.mjs:17:  const path = teeOriginalOutput('raw output', { sessionId: 'session', toolUseId: 'tool', config, env, lossy: true });
+tests/tee.test.mjs:18:  assert.equal(path, teePath('session', 'tool', env));
+tests/tee.test.mjs:25:test('tee attachment never rewrites a marker supplied by tool output', () => {
+tests/tee.test.mjs:31:test('tee ids cannot traverse out of the recovery directory', () => withCache((cache) => {
+tests/tee.test.mjs:33:  const path = teeOriginalOutput('raw', { sessionId: '..', toolUseId: '..', config, env, lossy: true });
+tests/tee.test.mjs:34:  const root = join(cache, 'tokenslim', 'tee');
+tests/tee.test.mjs:40:test('rotates tee files per session and respects never mode', () => withCache((cache) => {
+tests/tee.test.mjs:42:  const rotating = { tee: { enabled: true, mode: 'lossy', maxFiles: 2 } };
+tests/tee.test.mjs:44:    teeOriginalOutput(id, { sessionId: 'session', toolUseId: id, config: rotating, env, lossy: true });
+tests/tee.test.mjs:46:  assert.equal(existsSync(teePath('session', 'one', env)), false);
+tests/tee.test.mjs:47:  assert.equal(existsSync(teePath('session', 'two', env)), true);
+tests/tee.test.mjs:48:  assert.equal(existsSync(teePath('session', 'three', env)), true);
+tests/tee.test.mjs:49:  assert.equal(teeOriginalOutput('raw', { sessionId: 'session', toolUseId: 'never', config: { tee: { enabled: true, mode: 'never' } }, env, lossy: true }), null);
+tests/tee.test.mjs:52:test('lossless transformations and failed tee writes never block compression', () => withCache((cache) => {
+tests/tee.test.mjs:54:  assert.equal(teeOriginalOutput('raw', { sessionId: 'session', toolUseId: 'lossless', config, env, lossy: false }), null);
+tests/tee.test.mjs:57:  assert.equal(teeOriginalOutput('raw', { sessionId: 'session', toolUseId: 'write-failure', config, env: { XDG_CACHE_HOME: fileCache, TOKENSLIM_TEE_MIN: '1' }, lossy: true }), null);
+scripts/lib/transcripts.mjs:8:// A compressed result ends with our marker on its own line (or a tee `full:` marker). Matching only the final line keeps
+scripts/lib/transcripts.mjs:13:// source as a whole line: a marker line directly followed by a `stderr:` line, and the tee `[tokenslim: full: <path>]` line.
+scripts/lib/bash-hook.mjs:7:import { appendTeePath, teeOriginalOutput } from './tee.mjs';
+scripts/lib/bash-hook.mjs:88:  // Output can legitimately contain tokenslim examples or a prior tee log. Always
+scripts/lib/bash-hook.mjs:95: * is teed for recovery. Outcomes: disabled, skippedImage, skippedBelowThreshold, skippedFailure,
+scripts/lib/bash-hook.mjs:96: * skippedPoorRatio, compressed. bytesOut is what would be emitted (tee marker included); pass-through
+scripts/lib/bash-hook.mjs:132:  const recoveryPath = dryRun ? null : teeOriginalOutput(original, {
+scripts/lib/tee.mjs:17:export function teePath(sessionId, toolUseId, env = process.env) {
+scripts/lib/tee.mjs:23:  return join(cacheHome, 'tokenslim', 'tee', session, `${toolUse}.log`);
+scripts/lib/tee.mjs:26:export function teeMinBytes(env = process.env) {
+scripts/lib/tee.mjs:31:function teeEnabled(config, env) {
+scripts/lib/tee.mjs:33:  if (disabled.includes('all') || disabled.includes('tee')) return false;
+scripts/lib/tee.mjs:34:  const tee = config?.tee || {};
+scripts/lib/tee.mjs:35:  return tee.enabled !== false && tee.mode !== 'never';
+scripts/lib/tee.mjs:50:export function teeOriginalOutput(text, {
+scripts/lib/tee.mjs:59:    if (!lossy || !teeEnabled(config, env)) return null;
+scripts/lib/tee.mjs:60:    const mode = config?.tee?.mode || 'lossy';
+scripts/lib/tee.mjs:63:    if (Buffer.byteLength(String(text ?? ''), 'utf8') < teeMinBytes(env)) return null;
+scripts/lib/tee.mjs:64:    const path = teePath(sessionId, toolUseId, env);
+scripts/lib/tee.mjs:65:    const maxFiles = Number.isFinite(config?.tee?.maxFiles) ? config.tee.maxFiles : DEFAULT_MAX_FILES;
+scripts/lib/tee.mjs:90:// have printed a tokenslim example, or be reading a previous tee log. Our recovery
+scripts/lib/config.mjs:12:  tee: { enabled: true, mode: 'lossy', maxFiles: 20 },
+scripts/lib/config.mjs:52:  if (plainObject(value.tee)) {
+scripts/lib/config.mjs:53:    const tee = {};
+scripts/lib/config.mjs:54:    if (typeof value.tee.enabled === 'boolean') tee.enabled = value.tee.enabled;
+scripts/lib/config.mjs:55:    if (['lossy', 'failures', 'never'].includes(value.tee.mode)) tee.mode = value.tee.mode;
+scripts/lib/config.mjs:56:    if (Number.isFinite(value.tee.maxFiles) && value.tee.maxFiles >= 0) tee.maxFiles = value.tee.maxFiles;
+scripts/lib/config.mjs:57:    if (Object.keys(tee).length) layer.tee = tee;
+scripts/lib/config.mjs:99:  for (const key of ['tee', 'rewrite']) next[key] = { ...base[key], ...(layer[key] || {}) };

@@ -1,13 +1,20 @@
+import { omittedMatchCounts } from './shape-compressors/grep.mjs';
+
 const DEFAULT_MAX_CHARS = 40000;
 const DEFAULT_HEAD_LINES = 150;
 const DEFAULT_TAIL_LINES = 250;
 const MARKER_PREFIX = '[tokenslim:';
 
+// Real ESC sequences only. The literal text `\u001b[31m` is ordinary data (source code, JSON logs, tests) and is never
+// stripped: that would silently alter kept lines, and isLossy() treats ANSI removal as display-only so no tee would exist.
 export function stripAnsi(text) {
   return String(text ?? '')
-    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, '')
-    .replace(/\\u001b\[[0-?]*[ -/]*[@-~]/gi, '');
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, '');
 }
+
+// Rule attribution must not hinge on the trailing newline the rules normalize away.
+const trimEnd = (text) => String(text ?? '').replace(/\n+$/g, '');
+const sameText = (a, b) => trimEnd(a) === trimEnd(b);
 
 function normalizeNewlines(text) {
   return String(text ?? '').replace(/\r\n/g, '\n');
@@ -37,8 +44,13 @@ export function stripProgressNoise(text, options = {}) {
   const kept = [];
   let omitted = 0;
   for (const line of lines) {
-    const parts = line.split(/\r|\\r/g);
-    const final = parts[parts.length - 1];
+    // Only a real carriage return overwrites; a source line may contain the two characters `\r`. A trailing bare CR
+    // (CRLF remnants) leaves an empty last segment, and terminals show the last non-empty one.
+    const parts = line.split('\r');
+    let final = '';
+    for (let i = parts.length - 1; i >= 0; i -= 1) {
+      if (parts[i] !== '') { final = parts[i]; break; }
+    }
     if (isProgressNoise(final, options)) {
       omitted += 1;
       continue;
@@ -174,7 +186,7 @@ export function summarizeTestRunners(text) {
       kept.push(line);
       continue;
     }
-    if (/^\s*(?:\\u001b\[[0-9;]*m)?(?:FAIL|FAILED)\b/.test(line) || /\bFAILED$/.test(line) || /^\s*FAILED\s+/.test(line)) {
+    if (/^\s*(?:FAIL|FAILED)\b/.test(line) || /\bFAILED$/.test(line) || /^\s*FAILED\s+/.test(line)) {
       inIndentedFailure = true;
       kept.push(line);
       continue;
@@ -287,6 +299,22 @@ export function dedupStackTraces(text) {
   return output.join('\n').replace(/\n+$/g, '');
 }
 
+const MAX_COUNT_FILES = 40;
+
+function formatMatchCounts(counts) {
+  const shown = counts.slice(0, MAX_COUNT_FILES);
+  const lines = [`${MARKER_PREFIX} omitted matches by file]`, ...shown.map(([path, count]) => `${path}: ${count}`)];
+  const rest = counts.slice(MAX_COUNT_FILES);
+  if (rest.length) lines.push(`${MARKER_PREFIX} ${rest.length} more files, ${rest.reduce((sum, [, count]) => sum + count, 0)} matches]`);
+  return lines;
+}
+
+/**
+ * Keeps the first headLines and last tailLines lines. Options: maxChars (no-op below it), headLines, tailLines;
+ * grepCounts (the output cap): when the omitted region is grep-shaped, list omitted matches per file;
+ * maxImportant (the output cap): at most this many error-like omitted lines are re-shown, so a grep for "error"
+ * cannot reproduce the whole omitted region.
+ */
 export function headTailTruncate(text, opts = {}) {
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
   if (String(text ?? '').length <= maxChars) return String(text ?? '');
@@ -304,8 +332,14 @@ export function headTailTruncate(text, opts = {}) {
     ...lines.slice(0, headLines),
     `${MARKER_PREFIX} ${omitted.length} lines omitted]`,
   ];
+  if (opts.grepCounts) {
+    const counts = omittedMatchCounts(lines, omittedStart, omittedEnd);
+    if (counts) output.push(...formatMatchCounts(counts));
+  }
   if (important.length > 0) {
-    output.push(`${MARKER_PREFIX} important omitted lines]`, ...important);
+    const limit = Number.isInteger(opts.maxImportant) && opts.maxImportant >= 0 ? opts.maxImportant : important.length;
+    output.push(`${MARKER_PREFIX} important omitted lines]`, ...important.slice(0, limit));
+    if (important.length > limit) output.push(`${MARKER_PREFIX} ${important.length - limit} more important lines omitted]`);
   }
   output.push(...lines.slice(omittedEnd));
   return output.join('\n').replace(/\n+$/g, '');
@@ -329,7 +363,7 @@ export function compressBashOutput(text, opts = {}) {
     ['dedupStackTraces', dedupStackTraces],
   ]) {
     const next = fn(output);
-    if (next !== output) {
+    if (!sameText(next, output)) {
       // Test summaries discard earlier repetitive runner lines (and their marker),
       // so do not report a collapse that is absent from the final replacement.
       if (name === 'summarizeTestRunners') {
@@ -342,7 +376,7 @@ export function compressBashOutput(text, opts = {}) {
   }
 
   const truncated = headTailTruncate(output, opts);
-  if (truncated !== output) rulesApplied.push('headTailTruncate');
+  if (!sameText(truncated, output)) rulesApplied.push('headTailTruncate');
   output = truncated;
 
   // Never replace ordinary output with an empty or near-empty summary. Test

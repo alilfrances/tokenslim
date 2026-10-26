@@ -6,6 +6,7 @@
 // best-effort. Writes themselves are atomic (temp file + rename), never torn JSON.
 
 import { chmodSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { updateHistory } from './history.mjs';
@@ -101,6 +102,45 @@ export function recordSavings(state, { tool, bytesIn, bytesOut, command, cwd }) 
   return state;
 }
 
+// Bytes of tool results that reached a hook's size check, whether or not they were compressed: the honest
+// denominator for "% of attempted". Images are never passed in. Kept apart from savings so it never bumps their events.
+export function recordAttempted(state, { tool, bytes, cwd }) {
+  if (!state || typeof state !== 'object') return state;
+  if (!state.attempted || typeof state.attempted !== 'object') state.attempted = {};
+  const key = String(tool ?? 'unknown');
+  const size = Number(bytes) || 0;
+  const entry = state.attempted[key] || { events: 0, bytes: 0 };
+  entry.events = (Number(entry.events) || 0) + 1;
+  entry.bytes = (Number(entry.bytes) || 0) + size;
+  state.attempted[key] = entry;
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push({ kind: 'attempted', tool: key, bytes: size, cwd });
+  return state;
+}
+
+// Recovery signals for the Bash cap: capped, teeRead, teeCat, rerun. Counted in the ledger diagnostics and as a compact
+// daily counter in history, so the recovery rate survives past one session.
+export function recordRecovery(state, outcome) {
+  if (!state || typeof state !== 'object') return state;
+  recordDiagnostic(state, { tool: 'Bash', event: 'recovery', outcome });
+  if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
+  state.historyEvents.push({ kind: 'recovery', outcome: String(outcome) });
+  return state;
+}
+
+const RECENT_BASH = 3;
+
+// Remembers the last few Bash commands as hashes only (never command text) and reports whether this one repeats a
+// command whose output was capped, i.e. the model probably re-ran it to get what the cap hid.
+export function noteBashCommand(state, command, capped) {
+  if (!state || typeof state !== 'object' || typeof command !== 'string' || !command) return false;
+  const ring = Array.isArray(state.recentBash) ? state.recentBash : [];
+  const h = createHash('sha256').update(command, 'utf8').digest('hex').slice(0, 16);
+  const rerun = ring.some((entry) => entry && entry.h === h && entry.capped === true);
+  state.recentBash = [...ring, { h, capped: Boolean(capped) }].slice(-RECENT_BASH);
+  return rerun;
+}
+
 export function recordDiagnostic(state, { tool, event, outcome }) {
   if (!state || typeof state !== 'object') return state;
   if (!state.diagnostics || typeof state.diagnostics !== 'object') state.diagnostics = {};
@@ -157,4 +197,32 @@ export function summarize(state) {
     perTool,
     diagnostics: (state && state.diagnostics) || {},
   };
+}
+
+const GUARD_DENIED_MAX = 200;
+
+// Read-guard deny escape hatch: one load and at most one small write. `key` is sha256(path), so no raw
+// paths reach the ledger. Returns 'deny' when this is the first unbounded Read (entry recorded),
+// 'allow' when a deny is already pending (entry consumed, so a later third Read starts a new deny cycle),
+// and 'error' when a first deny could not be recorded: the caller must then stay silent, because a deny
+// that cannot be followed by an allowed repeat would block the Read for good.
+export function consumeGuardDeny(sessionId, key) {
+  try {
+    const state = loadState(sessionId);
+    const denied = state.guardDenied && typeof state.guardDenied === 'object' ? state.guardDenied : {};
+    if (Object.hasOwn(denied, key)) {
+      delete denied[key];
+      state.guardDenied = denied;
+      try { secureWriteState(sessionId, state); } catch { /* a stale entry only delays the next deny cycle */ }
+      return 'allow';
+    }
+    denied[key] = Date.now();
+    const keys = Object.keys(denied);
+    for (const old of keys.slice(0, Math.max(0, keys.length - GUARD_DENIED_MAX))) delete denied[old];
+    state.guardDenied = denied;
+    secureWriteState(sessionId, state);
+    return 'deny';
+  } catch {
+    return 'error';
+  }
 }

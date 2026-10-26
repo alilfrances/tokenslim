@@ -2,9 +2,9 @@
 // PostToolUse hook for generic MCP tool results.
 
 import { readFileSync } from 'node:fs';
-import { loadState, saveState, recordDiagnostic, recordSavings } from './lib/state.mjs';
+import { loadState, saveState, recordAttempted, recordDiagnostic, recordSavings } from './lib/state.mjs';
 import { postToolUseNoopOutput, postToolUseOutput } from './lib/hook-output.mjs';
-import { locateText } from './lib/read-format.mjs';
+import { isMediaResponse, locateText } from './lib/read-format.mjs';
 import { loadConfig } from './lib/config.mjs';
 import { appendTeePath, teeOriginalOutput } from './lib/tee.mjs';
 // Raw base64-looking text is often a hex dump or an identifier the caller needs.
@@ -33,16 +33,6 @@ function isDisabled(config) {
 
 function eventName(payload) {
   return payload?.hook_event_name || 'PostToolUse';
-}
-
-function recordDiagnosticBestEffort(payload, outcome) {
-  try {
-    const state = loadState(payload?.session_id);
-    recordDiagnostic(state, { tool: 'MCP', event: eventName(payload), outcome });
-    saveState(payload?.session_id, state);
-  } catch {
-    // best-effort diagnostics only
-  }
 }
 
 function passThrough(payload) {
@@ -85,6 +75,7 @@ function transformText(text) {
   return { text: base64Collapsed, lossy };
 }
 
+// One ledger load and save per invocation, flushed in `finally` so a fail-open exception keeps what was recorded.
 function main(input) {
   let payload;
   try {
@@ -94,29 +85,42 @@ function main(input) {
   }
 
   const config = loadConfig(payload?.cwd || process.cwd(), process.env);
+  const state = loadState(payload?.session_id);
+  try {
+    run(payload, config, state);
+  } finally {
+    saveState(payload?.session_id, state);
+  }
+}
+
+function run(payload, config, state) {
+  const note = (outcome) => recordDiagnostic(state, { tool: 'MCP', event: eventName(payload), outcome });
   if (isDisabled(config)) {
-    recordDiagnosticBestEffort(payload, 'disabled');
+    note('disabled');
     passThrough(payload);
     return;
   }
-  recordDiagnosticBestEffort(payload, 'attempted');
+  note('attempted');
 
   const locator = locateText(payload?.tool_response);
   if (!locator) {
-    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    note('unsupportedShape');
     passThrough(payload);
     return;
   }
 
   const text = locator.get();
   if (typeof text !== 'string') {
-    recordDiagnosticBestEffort(payload, 'unsupportedShape');
+    note('unsupportedShape');
     passThrough(payload);
     return;
   }
+  if (!isMediaResponse(payload?.tool_response)) {
+    recordAttempted(state, { tool: 'MCP', bytes: Buffer.byteLength(text, 'utf8'), cwd: payload?.cwd });
+  }
   const minChars = Number.isFinite(config.minChars) ? config.minChars : 500;
   if (text.length < minChars) {
-    recordDiagnosticBestEffort(payload, 'skippedBelowThreshold');
+    note('skippedBelowThreshold');
     passThrough(payload);
     return;
   }
@@ -125,7 +129,7 @@ function main(input) {
   try {
     compressed = transformText(text);
   } catch {
-    recordDiagnosticBestEffort(payload, 'failedOpen');
+    note('failedOpen');
     passThrough(payload);
     return;
   }
@@ -133,7 +137,7 @@ function main(input) {
   const saved = text.length - compressed.text.length;
   const ratio = text.length > 0 ? saved / text.length : 0;
   if (ratio < 0.1) {
-    recordDiagnosticBestEffort(payload, 'skippedPoorRatio');
+    note('skippedPoorRatio');
     passThrough(payload);
     return;
   }
@@ -146,15 +150,10 @@ function main(input) {
     lossy: compressed.lossy,
     failed: Boolean(payload?.tool_response?.stderr || payload?.tool_response?.exitCode || payload?.tool_response?.exit_code),
   });
-  const updatedToolOutput = locator.set(appendTeePath(compressed.text, recoveryPath));
-  try {
-    const state = loadState(payload?.session_id);
-    recordDiagnostic(state, { tool: 'MCP', event: eventName(payload), outcome: 'compressed' });
-    recordSavings(state, { tool: 'MCP', bytesIn: Buffer.byteLength(text, 'utf8'), bytesOut: Buffer.byteLength(appendTeePath(compressed.text, recoveryPath), 'utf8'), command: payload?.tool_name || 'MCP', cwd: payload?.cwd });
-    saveState(payload?.session_id, state);
-  } catch {
-    // savings are best-effort
-  }
+  const emitted = appendTeePath(compressed.text, recoveryPath);
+  const updatedToolOutput = locator.set(emitted);
+  note('compressed');
+  recordSavings(state, { tool: 'MCP', bytesIn: Buffer.byteLength(text, 'utf8'), bytesOut: Buffer.byteLength(emitted, 'utf8'), command: payload?.tool_name || 'MCP', cwd: payload?.cwd });
   process.stdout.write(JSON.stringify(postToolUseOutput(payload, updatedToolOutput)));
 }
 
