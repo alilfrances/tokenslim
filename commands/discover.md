@@ -1,5 +1,5 @@
 ---
-description: Find large uncompressed Bash outputs and missed quiet-rewrite opportunities in Claude transcripts
+description: Find large uncompressed Bash outputs and quiet-rewrite opportunities (rewrites are opt-in) in Claude transcripts
 allowed-tools: Bash(node:*)
 argument-hint: [--since days] [--project [path]|--all] [--limit N] [--format text|json]
 ---

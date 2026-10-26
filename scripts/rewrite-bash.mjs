@@ -18,7 +18,8 @@ function main(input) {
   try { payload = JSON.parse(input); } catch { return; }
   const cwd = typeof payload?.cwd === 'string' ? payload.cwd : process.cwd();
   const config = loadConfig(cwd, process.env);
-  if (isDisabled(config)) return;
+  // Off by default: a rewrite returns permissionDecision "allow", which skips the permission prompt.
+  if (config.rewrite?.enabled !== true || isDisabled(config)) return;
   const result = rewriteCommand(payload?.tool_input?.command, config);
   if (!result) return;
   process.stdout.write(JSON.stringify(preToolUseRewriteOutput(payload, result.command, result.rules, process.env)));

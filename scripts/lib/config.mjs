@@ -10,7 +10,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   readGuardLines: 2000,
   readDefaultLines: 2000,
   tee: { enabled: true, mode: 'lossy', maxFiles: 20 },
-  rewrite: { enabled: true, exclude: [], dockerBuild: false },
+  rewrite: { enabled: false, exclude: [], dockerBuild: false },
   filters: [],
 });
 

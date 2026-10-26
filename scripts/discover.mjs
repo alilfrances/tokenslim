@@ -23,7 +23,9 @@ function add(map, key, bytes, extra = {}) {
 }
 function discover() {
   const sinks = new Map(); const opportunities = new Map(); const families = new Map(); let pairs = 0;
-  const config = loadConfig(cwd, process.env);
+  const loaded = loadConfig(cwd, process.env);
+  // Evaluate as if opted in so the report can inform that decision; rewrites are off by default.
+  const config = { ...loaded, rewrite: { ...loaded.rewrite, enabled: true } };
   const files = transcriptFiles({ root: transcriptRoot(process.env), cwd, all: allProjects || Boolean(process.env.TOKENSLIM_TRANSCRIPTS_DIR) });
   for (const pair of toolPairs(files, { sinceMs: Date.now() - since * 86400000, tools: ['Bash'] })) {
     const command = pair.input.command;
@@ -41,7 +43,7 @@ function discover() {
 function render(report) {
   if (!report.scannedFiles) return 'tokenslim discover: no transcripts found.';
   const section = (title, rows) => [title, ...(rows.length ? rows.map((r) => `  ${r.command}  ~${r.tokens.toLocaleString()} tokens (${r.occurrences} runs)`) : ['  (none)'])];
-  return ['tokenslim transcript discovery:', `  scanned ${report.scannedFiles} transcript(s), ${report.pairs} Bash result(s)`, ...section('top uncompressed sinks:', report.sinks), ...section('missed rewrite opportunities:', report.rewriteOpportunities), ...section('top command families:', report.commandFamilies)].join('\n');
+  return ['tokenslim transcript discovery:', `  scanned ${report.scannedFiles} transcript(s), ${report.pairs} Bash result(s)`, ...section('top uncompressed sinks:', report.sinks), ...section('rewrite opportunities (rewrites are opt-in):', report.rewriteOpportunities), ...section('top command families:', report.commandFamilies)].join('\n');
 }
 try { const report = discover(); console.log(format === 'json' ? JSON.stringify(report) : render(report)); } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

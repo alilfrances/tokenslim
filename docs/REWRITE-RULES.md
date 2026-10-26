@@ -4,6 +4,19 @@
 flags on the original binary; it never proxies or replaces that binary. No rewrite emits
 no hook output.
 
+**Rewrites are off by default since 0.4.0.** With the default config the hook exits
+immediately: no output, no tokenizing, no state written.
+
+> **Security warning.** An applied rewrite returns `permissionDecision: "allow"`, which
+> auto-approves the rewritten command and bypasses Claude Code's permission prompt for it.
+> Several rewritten commands (`npm install`/`ci`, `pip install`, `cargo build`/`check`/`test`)
+> can run arbitrary package scripts or build scripts. Enable rewrites only if you accept
+> that those commands run without asking.
+
+To opt in, set `{"rewrite":{"enabled":true}}` in `.tokenslim.json` or the user config (see
+Configuration), or set `TOKENSLIM_REWRITE_ENABLED=true`. `/tokenslim:discover` reports
+rewrite opportunities as if enabled, to help you decide.
+
 ## Rules
 
 | Command | Rewrite |
@@ -51,6 +64,6 @@ override user settings; environment variables override both.
 }
 ```
 
-Set `TOKENSLIM_DISABLE=rewrite` (or `all`) to turn the hook off. Environment overrides also
+`rewrite.enabled` defaults to `false`. Set `TOKENSLIM_DISABLE=rewrite` (or `all`) to turn the hook off even when enabled. Environment overrides also
 include `TOKENSLIM_REWRITE_ENABLED`, `TOKENSLIM_REWRITE_EXCLUDE`, and
 `TOKENSLIM_REWRITE_DOCKER_BUILD`.
