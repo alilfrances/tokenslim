@@ -1,6 +1,6 @@
 // Bash PostToolUse core, free of stdin/stdout/ledger I/O so the hook wrapper, the offline replay benchmark and
 // the parity test all run the same code. The wrapper (compress-bash.mjs) owns the ledger and the JSON output.
-import { compressBashOutput, headTailTruncate, stripAnsi, stripProgressNoise } from './pipeline.mjs';
+import { cleanDisplay, compressBashOutput, detectionText, headTailTruncate, stripAnsi, stripProgressNoise } from './pipeline.mjs';
 import { commandMeta, compressCommandOutput } from './cmd-compressors/index.mjs';
 import { compressShapeOutput } from './shape-compressors/index.mjs';
 import { FAILURE_RE } from './cmd-compressors/shared.mjs';
@@ -27,12 +27,12 @@ export function failureOutput(stdout, stderr, command, response) {
   // failure channel.
   const exitFailure = observedExitFailure(response);
   if (exitFailure !== null) return exitFailure;
-  if (FAILURE_RE.test(stripAnsi(stderr))) return true;
+  if (FAILURE_RE.test(detectionText(stderr))) return true;
   // Linter diagnostics have a purpose-built, location-preserving compressor. Their
   // stdout diagnostics are the one intentional exception; a failure on stderr still
   // passes through above. commandMeta also handles env/path/launcher forms here.
   const binary = commandMeta(command)?.binary;
-  return !['eslint', 'tsc', 'ruff'].includes(binary) && FAILURE_RE.test(stripAnsi(stdout));
+  return !['eslint', 'tsc', 'ruff'].includes(binary) && FAILURE_RE.test(detectionText(stdout));
 }
 
 function compressStderr(text) {
@@ -61,16 +61,16 @@ function compressed(text, command, config, extra, genericOptions) {
   // Shape dispatch reads only the output, so it applies even when the command is unsafe or unknown.
   const shaped = compressShapeOutput(text);
   if (shaped) {
-    const generic = compressBashOutput(shaped.text, genericOptions);
-    // The generic pass also trims trailing newlines and normalizes CRLF, which is display-only like ANSI.
-    const displayOnly = stripAnsi(shaped.text).replace(/\r\n/g, '\n').replace(/\n+$/g, '');
+    // Only display-only cleanup after a lossless shape: the generic lossy rules (repeat collapse, test summaries,
+    // stack-trace dedup) have no business in grep output and collapsed hits that differ only in line number.
+    const clean = cleanDisplay(shaped.text);
     return {
-      text: generic.text,
-      lossless: shaped.lossless === true && generic.text === displayOnly,
+      text: clean.text,
+      lossless: shaped.lossless === true,
       stats: {
         bytesIn: Buffer.byteLength(text, 'utf8'),
-        bytesOut: generic.stats.bytesOut,
-        rulesApplied: [...new Set([...shaped.rulesApplied, ...generic.stats.rulesApplied])],
+        bytesOut: Buffer.byteLength(clean.text, 'utf8'),
+        rulesApplied: [...new Set([...shaped.rulesApplied, ...clean.rulesApplied])],
       },
     };
   }

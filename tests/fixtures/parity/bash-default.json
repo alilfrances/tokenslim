@@ -1,4 +1,24 @@
 {
+  "bash/cargo-build-literal-escapes.txt": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "packageManagerSummary"
+    ],
+    "bytesIn": 2101,
+    "bytesOut": 206,
+    "recoveryPath": null,
+    "sha256": "149f623e600ec63bc21d07170ef00937aef07931e53b0226c23df7d6a6244620"
+  },
+  "bash/cargo-build-literal-escapes.txt (tee)": {
+    "outcome": "compressed",
+    "rulesApplied": [
+      "packageManagerSummary"
+    ],
+    "bytesIn": 2101,
+    "bytesOut": 231,
+    "recoveryPath": "<tee>",
+    "sha256": "c42a58918f0cd8708da3e2d7d80fc76e3872791ab73070b2b5ccd4c602c882ea"
+  },
   "bash/cargo-build.txt": {
     "outcome": "compressed",
     "rulesApplied": [
@@ -141,6 +161,38 @@
     "recoveryPath": null,
     "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
   },
+  "bash/jest-failing-blank-lines.txt": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 3187,
+    "bytesOut": 3187,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/jest-failing-blank-lines.txt (tee)": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 3187,
+    "bytesOut": 3187,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/jest-failing-truncated.txt": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2868,
+    "bytesOut": 2868,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/jest-failing-truncated.txt (tee)": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2868,
+    "bytesOut": 2868,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
   "bash/npm-install.txt": {
     "outcome": "compressed",
     "rulesApplied": [
@@ -160,6 +212,22 @@
     "bytesOut": 197,
     "recoveryPath": "<tee>",
     "sha256": "81afe8c83f4e76d5e74898020be4862be98d3b4fb29a11fea2d5528ae91e7b2c"
+  },
+  "bash/npm-test-failing-literal-escapes.txt": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2094,
+    "bytesOut": 2094,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "bash/npm-test-failing-literal-escapes.txt (tee)": {
+    "outcome": "skippedFailure",
+    "rulesApplied": [],
+    "bytesIn": 2094,
+    "bytesOut": 2094,
+    "recoveryPath": null,
+    "sha256": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
   },
   "bash/npm-test-failing.txt": {
     "outcome": "skippedFailure",

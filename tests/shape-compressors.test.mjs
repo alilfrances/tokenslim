@@ -226,22 +226,21 @@ test('hook: a literal \\r in source text survives grouping verbatim and is not a
   assert.equal(ungroup(body), input.replace(/\n+$/g, ''));
 });
 
-test('hook: when generic rules also change the grouped text lossily the original is still teed', () => {
-  // A bare spinner line between groups is dropped by the generic progress rule, which is lossy.
+test('hook: a spinner-looking line between groups is kept verbatim; the generic lossy rules do not run after a shape', () => {
   const path = 'src/components/deeply/nested/widget.js';
   const lines = [...numbered(path, 1, 30), '|', ...numbered(path, 50, 30)];
   const input = `${lines.join('\n')}\n`;
   const { result, teed } = run(input);
   assert.equal(result.outcome, 'compressed');
-  assert.ok(result.rulesApplied.includes('groupByPath'));
-  assert.ok(result.rulesApplied.includes('stripProgressNoise'));
-  assert.ok(result.recoveryPath, 'lossy generic change is teed');
-  assert.equal(teed.length > 0, true);
+  assert.deepEqual(result.rulesApplied, ['groupByPath']);
+  assert.equal(result.recoveryPath, null, 'still lossless, so no tee');
+  assert.deepEqual(teed, []);
+  assert.ok(result.updatedToolOutput.stdout.split('\n').includes('|'));
 });
 
 test('hook: the 0.9 ratio gate still applies after grouping', () => {
   // Very short paths and long text save almost nothing: grouping may fire but the gate must reject it.
-  const input = Array.from({ length: 60 }, (_, i) => `a.js:${i + 1}:${'x'.repeat(60)}`).join('\n') + '\n';
+  const input = Array.from({ length: 60 }, (_, i) => `a.js:${i + 1}:${'x'.repeat(59)}${String.fromCharCode(97 + (i % 26))}`).join('\n') + '\n';
   const { result } = run(input, undefined, { dryRun: true });
   assert.equal(result.outcome, 'skippedPoorRatio');
   assert.equal(result.updatedToolOutput, null);

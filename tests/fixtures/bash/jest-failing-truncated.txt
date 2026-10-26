@@ -1,0 +1,72 @@
+> shop-api@2.4.0 test
+> jest
+
+[32mPASS[39m src/accounts/accounts.test.js
+[32mPASS[39m src/audit/audit.test.js
+[32mPASS[39m src/billing/billing.test.js
+[32mPASS[39m src/cache/cache.test.js
+[32mPASS[39m src/catalog/catalog.test.js
+[32mPASS[39m src/checkout/checkout.test.js
+[32mPASS[39m src/coupons/coupons.test.js
+[32mPASS[39m src/currency/currency.test.js
+[32mPASS[39m src/customers/customers.test.js
+[32mPASS[39m src/digest/digest.test.js
+[32mPASS[39m src/email/email.test.js
+[32mPASS[39m src/export/export.test.js
+[32mPASS[39m src/forms/forms.test.js
+[32mPASS[39m src/import/import.test.js
+[32mPASS[39m src/inventory/inventory.test.js
+[31mFAIL[39m src/invoices/invoices.test.js
+  [1m[31m●[39m[22m [1minvoices › keeps the original invoice id on refund[22m
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m"inv_000123"[39m
+    Received: [31m"inv_000124"[39m
+
+    [0m 17 |[0m
+    [0m[31m>[0m[90m 18 |[0m   expect(refund.invoiceId).toBe('inv_000123');
+    [0m [90m   |[0m                                         [31m^[0m
+    [0m 19 |[0m });[0m
+
+      [2mat Object.<anonymous> ([22msrc/invoices/invoices.test.js[2m:18:41)[22m
+
+[32mPASS[39m src/jobs/jobs.test.js
+[32mPASS[39m src/locale/locale.test.js
+[32mPASS[39m src/login/login.test.js
+[32mPASS[39m src/metrics/metrics.test.js
+[32mPASS[39m src/notifications/notifications.test.js
+[32mPASS[39m src/orders/orders.test.js
+[32mPASS[39m src/pagination/pagination.test.js
+[32mPASS[39m src/payments/payments.test.js
+[32mPASS[39m src/permissions/permissions.test.js
+[32mPASS[39m src/pricing/pricing.test.js
+[32mPASS[39m src/queue/queue.test.js
+[32mPASS[39m src/refunds/refunds.test.js
+[32mPASS[39m src/reports/reports.test.js
+[32mPASS[39m src/router/router.test.js
+[32mPASS[39m src/search/search.test.js
+[32mPASS[39m src/sessions/sessions.test.js
+[32mPASS[39m src/shipping/shipping.test.js
+[32mPASS[39m src/sso/sso.test.js
+[32mPASS[39m src/subscriptions/subscriptions.test.js
+[31mFAIL[39m src/tax/tax.test.js
+  [1m[31m●[39m[22m [1mtax › rounds half cents up for EU totals[22m
+
+    [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+    Expected: [32m1999[39m
+    Received: [31m2000[39m
+
+    [0m 41 |[0m
+    [0m[31m>[0m[90m 42 |[0m   expect(total(1999.5)).toBe(1999);
+    [0m [90m   |[0m                                         [31m^[0m
+    [0m 43 |[0m });[0m
+
+      [2mat Object.<anonymous> ([22msrc/tax/tax.test.js[2m:42:41)[22m
+
+[32mPASS[39m src/teams/teams.test.js
+[32mPASS[39m src/templates/templates.test.js
+[32mPASS[39m src/uploads/uploads.test.js
+[32mPASS[39m src/users/users.test.js
+[32mPASS[39m src/webhooks/webhooks.test.js

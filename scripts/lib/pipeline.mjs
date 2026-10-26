@@ -1,4 +1,4 @@
-import { omittedMatchCounts } from './shape-compressors/grep.mjs';
+import { locationMask, omittedMatchCounts } from './shape-compressors/grep.mjs';
 
 const DEFAULT_MAX_CHARS = 40000;
 const DEFAULT_HEAD_LINES = 150;
@@ -12,12 +12,27 @@ export function stripAnsi(text) {
     .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, '');
 }
 
+// Matching-only view of a line or text: real ESC sequences and their literal spellings (`\u001b[31m`, `\x1b[31m`,
+// `\033[31m`, `\e[31m`: CSI = parameters, then a final byte) are removed. Use it ONLY to decide what a line is; output
+// must always be built from the original line, so kept lines stay byte-identical (see stripAnsi above).
+const LITERAL_CSI_RE = /(?:\\u001[bB]|\\u\{1[bB]\}|\\x1[bB]|\\033|\\e)\[[0-?]*[ -/]*[@-~]/g;
+export function detectionText(text) {
+  return stripAnsi(text).replace(LITERAL_CSI_RE, '');
+}
+
 // Rule attribution must not hinge on the trailing newline the rules normalize away.
 const trimEnd = (text) => String(text ?? '').replace(/\n+$/g, '');
 const sameText = (a, b) => trimEnd(a) === trimEnd(b);
 
 function normalizeNewlines(text) {
   return String(text ?? '').replace(/\r\n/g, '\n');
+}
+
+/** Display-only cleanup (ANSI, CRLF, trailing newlines) for output a lossless shape compressor already rewrote. */
+export function cleanDisplay(text) {
+  const input = String(text ?? '');
+  const withoutAnsi = stripAnsi(input);
+  return { text: normalizeNewlines(withoutAnsi).replace(/\n+$/g, ''), rulesApplied: withoutAnsi !== input ? ['stripAnsi'] : [] };
 }
 
 function isProgressNoise(line, { buildProgress = false } = {}) {
@@ -104,11 +119,16 @@ function flushRepeat(buffer, output) {
 
 export function collapseRepeatedLines(text) {
   const lines = normalizeNewlines(text).split('\n');
+  // Fingerprints erase every number, so grep hits that differ only in their line number look identical. A
+  // location-bearing line may therefore join a run only as a byte-identical copy; the location is the answer. A failing
+  // test's name is the same kind of answer (`FAILED tests/t_1.py::case_1`, `FAILED tests/t_2.py::case_2`, ...).
+  const located = locationMask(lines).map((hit, index) => hit || FAIL_NAME_RE.test(detectionText(lines[index])));
   const output = [];
   let buffer = [];
   let fp = '';
+  let bufferLocated = false;
 
-  for (const line of lines) {
+  for (const [index, line] of lines.entries()) {
     const current = fingerprintLine(line);
     if (!current) {
       flushRepeat(buffer, output);
@@ -121,12 +141,13 @@ export function collapseRepeatedLines(text) {
     if (buffer.length === 0) {
       buffer = [line];
       fp = current;
+      bufferLocated = located[index];
       continue;
     }
 
     // Do not bridge a run across a different line: that line may be a unique
     // warning. Fingerprints alone are also insufficient for numbered listings.
-    if (current === fp && hasStrongRawSimilarity(buffer[0], line)) {
+    if (current === fp && hasStrongRawSimilarity(buffer[0], line) && (!(bufferLocated || located[index]) || line === buffer[0])) {
       buffer.push(line);
       continue;
     }
@@ -134,6 +155,7 @@ export function collapseRepeatedLines(text) {
     flushRepeat(buffer, output);
     buffer = [line];
     fp = current;
+    bufferLocated = located[index];
   }
 
   flushRepeat(buffer, output);
@@ -141,28 +163,44 @@ export function collapseRepeatedLines(text) {
 }
 
 const SUMMARY_RE = /(?:\b\d+\s+(?:failed|passed|skipped|error|errors|failures?|tests?|test files?)\b|Test Files|Tests|Duration|test result:|^ok\s+|^FAIL\b|^PASS\b|compiled with|Finished\b)/i;
-const FAIL_LINE_RE = /\b(?:FAILED|FAIL|failed|panicked|panic|AssertionError|Error:|Exception:)\b/;
-const TEST_SIGNAL_RE = /^(?:PASS|FAIL)\s+\S+|^ok\s+\d|^not ok\s|^\d+ passing\b|^Test Suites:|^Test Files\s|^test result:|^=+ .* (?:passed|failed).* =+$|^(?:PASSED|FAILED|ERROR)\s*:|^.*::\S+\s+(?:PASSED|FAILED|ERROR|SKIPPED)\s*$/;
+const FAIL_LINE_RE = /\b(?:FAILED|FAIL|failed|panicked|panic|AssertionError|Error:|Exception:)\b|\b[1-9]\d* failing\b|^not ok\s/;
+const TEST_SIGNAL_RE = /^(?:PASS|FAIL)\s+\S+|^ok\s+\d|^not ok\s|^\s*\d+ passing\b|^\s*\d+ failing\b|^Test Suites:|^Test Files\s|^test result:|^=+ .* (?:passed|failed).* =+$|^(?:PASSED|FAILED|ERROR)\s*:|^.*::\S+\s+(?:PASSED|FAILED|ERROR|SKIPPED)\s*$/;
 const TEST_SUMMARY_RE = /^(?:Test Suites:|Test Files\s|Tests\s+|Duration\b|test result:|=+ .* (?:passed|failed).* =+$|\d+\s+(?:passed|failed|skipped|error|errors|failures?)\b)/;
 
+// Lines that name a failing test or file. Never merged unless byte-identical, always kept by the test summary.
+const FAIL_NAME_RE = /^\s*(?:FAIL|FAILED)\b|\bFAILED$|^\s*--- FAIL\b|^\s*●\s+(?!Console\b)|^not ok\b|::\S+\s+(?:FAILED|ERROR)\b/;
+// Assertion detail is the reason a test failed; a failing run never drops it.
+const ASSERTION_DETAIL_RE = /\b(?:Expected|Received|expected|actual|Difference|Assertion)/;
+// A line that ends an indented failure block: the next file/test header or a runner summary.
+const BLOCK_HEADER_RE = /^\s*(?:PASS|ok|not ok)\b|^_{3,}.*_{3,}$|^=+ .* =+$|^\s*=== RUN\b|^\s*--- (?:PASS|SKIP)\b/;
+const BLOCK_SUMMARY_RE = /^ {0,1}(?:Test Suites:|Test Files\s|Tests:?\s|Snapshots:|Time:|Duration\b|test result:|Ran all test suites)|^\s{0,2}\d+ (?:passing|failing|pending|passed|failed)\b/;
+const PASS_MARK_RE = /^\s*[✓✔√]\s/;
+const MOCHA_FAILING_RE = /^\s*\d+ failing\b/;
+const MOCHA_NUMBERED_RE = /^\s*\d+\)\s+\S/;
+
+// Raw lines in, detection applied inside: callers pass original lines.
 function isPassingTestLine(line) {
-  return /\b(?:PASSED|PASS|ok)\b/.test(line) && !FAIL_LINE_RE.test(line);
+  const text = detectionText(line);
+  return /\b(?:PASSED|PASS|ok)\b/.test(text) && !FAIL_LINE_RE.test(text);
 }
 
 function isTestOutput(lines) {
   // Repeated copies of the same line are not independent evidence that this is
   // runner output (logs and source snippets can contain them too).
-  const signals = [...new Set(lines.filter((line) => TEST_SIGNAL_RE.test(line)))];
-  return signals.length >= 2 || (signals.length === 1 && lines.some((line) => TEST_SUMMARY_RE.test(line)));
+  const views = lines.map(detectionText);
+  const signals = [...new Set(views.filter((line) => TEST_SIGNAL_RE.test(line)))];
+  return signals.length >= 2 || (signals.length === 1 && views.some((line) => TEST_SUMMARY_RE.test(line)));
 }
 
 export function summarizeTestRunners(text) {
   const lines = normalizeNewlines(text).split('\n');
   if (!isTestOutput(lines)) return text;
+  // Every decision below reads `view`; every emitted line is the original `lines[i]`.
+  const view = lines.map(detectionText);
 
-  const hasFailure = lines.some((line) => FAIL_LINE_RE.test(line));
+  const hasFailure = view.some((line) => FAIL_LINE_RE.test(line));
   if (!hasFailure) {
-    const kept = lines.filter((line) => SUMMARY_RE.test(line) && !isPassingTestLine(line));
+    const kept = lines.filter((line, i) => SUMMARY_RE.test(view[i]) && !isPassingTestLine(line));
     // Two runner signals alone are not enough to replace output: retain the
     // original unless a non-passing summary line remains actionable.
     if (kept.length === 0) return text;
@@ -173,35 +211,50 @@ export function summarizeTestRunners(text) {
   }
 
   const kept = [];
-  let inFailureBlock = false;
-  let inIndentedFailure = false;
-  for (const line of lines) {
-    if (/^=+\s*(?:FAILURES|short test summary info)\s*=+$/i.test(line)) {
+  let inFailureBlock = false; // pytest FAILURES / short test summary sections: kept whole
+  let inIndentedFailure = false; // jest/mocha/vitest/go/TAP block: its indented body and blank lines
+  // Mocha lists `1) name` both in the run and under `N failing`; with a failing count anywhere they are failure names.
+  const mochaFailing = view.some((line) => MOCHA_FAILING_RE.test(line));
+  for (const [i, line] of lines.entries()) {
+    const d = view[i];
+    if (/^=+\s*(?:FAILURES|short test summary info)\s*=+$/i.test(d)) {
       inFailureBlock = true;
+      inIndentedFailure = false;
       kept.push(line);
       continue;
     }
-    if (/^=+.*(?:failed|passed|skipped|error).*=+$/i.test(line)) {
+    if (/^=+.*(?:failed|passed|skipped|error).*=+$/i.test(d)) {
       inFailureBlock = false;
+      inIndentedFailure = false;
       kept.push(line);
       continue;
     }
-    if (/^\s*(?:FAIL|FAILED)\b/.test(line) || /\bFAILED$/.test(line) || /^\s*FAILED\s+/.test(line)) {
+    const startsFailure = FAIL_NAME_RE.test(d) || /^\s*FAILED\s+/.test(d) || (mochaFailing && MOCHA_NUMBERED_RE.test(d));
+    if (startsFailure) {
       inIndentedFailure = true;
       kept.push(line);
       continue;
     }
-    if (inIndentedFailure && (/^\s/.test(line) || line.trim() === '')) {
-      kept.push(line);
-      if (line.trim() === '') inIndentedFailure = false;
-      continue;
+    if (BLOCK_HEADER_RE.test(d) || BLOCK_SUMMARY_RE.test(d)) inIndentedFailure = false;
+    else if (inIndentedFailure) {
+      // The block goes on through blank lines (jest puts one between the test name and its assertion detail) and ends
+      // at a non-blank non-indented line. Passing-test marks inside it are noise unless they carry assertion detail.
+      if (d.trim() === '' || /^\s/.test(d)) {
+        if (!PASS_MARK_RE.test(d) || ASSERTION_DETAIL_RE.test(d)) kept.push(line);
+        continue;
+      }
+      inIndentedFailure = false;
     }
-    inIndentedFailure = false;
     if (inFailureBlock) {
       kept.push(line);
       continue;
     }
-    if (SUMMARY_RE.test(line) && !isPassingTestLine(line)) kept.push(line);
+    if (MOCHA_FAILING_RE.test(d) || (SUMMARY_RE.test(d) && !isPassingTestLine(line))) {
+      kept.push(line);
+      continue;
+    }
+    // Assertion detail printed outside an indented block (vitest prints `- Expected` / `+ Received` at column 0).
+    if (ASSERTION_DETAIL_RE.test(d) && !isPassingTestLine(line) && !PASS_MARK_RE.test(d)) kept.push(line);
   }
 
   const omitted = lines.length - kept.length;
