@@ -115,6 +115,11 @@ function session(fn) {
 
 const DENY = { TOKENSLIM_READ_GUARD_MODE: 'deny' };
 
+const ledgerPath = (iso, id = 'sess-guard') => join(iso.env.XDG_CACHE_HOME, 'tokenslim', `${id}.json`);
+const ledger = (iso, id) => JSON.parse(readFileSync(ledgerPath(iso, id), 'utf8'));
+const historyPath = (iso) => join(iso.env.XDG_DATA_HOME, 'tokenslim', 'history.json');
+const today = () => new Date().toISOString().slice(0, 10);
+
 function bigJs(path, functions = 100, bodyLines = 28) {
   const parts = [];
   for (let i = 0; i < functions; i += 1) {
@@ -125,7 +130,7 @@ function bigJs(path, functions = 100, bodyLines = 28) {
   writeFileSync(path, `${parts.join('\n')}\n`, 'utf8');
 }
 
-test('advise at the default config is byte-identical and does no state I/O', () => {
+test('advise at the default config is byte-identical; its only side effect is the readGuard counters', () => {
   withTemp((dir) => session((run, iso) => {
     const filePath = join(dir, 'large.txt');
     writeFileSync(filePath, 'x\n'.repeat(6), 'utf8');
@@ -141,7 +146,7 @@ test('advise at the default config is byte-identical and does no state I/O', () 
     const advised = JSON.parse(run(payload(big)).stdout);
     assert.equal(advised.hookSpecificOutput.permissionDecision, undefined);
     assert.match(advised.hookSpecificOutput.additionalContext, /big\.js is 3001 lines/);
-    assert.equal(existsSync(join(iso.env.XDG_CACHE_HOME, 'tokenslim')), false);
+    assert.equal(ledger(iso).readGuard.wouldDeny, 2);
   }));
 });
 
@@ -252,7 +257,8 @@ test('deny mode falls back to the advise output on Codex and without a session i
     assert.match(viaTurn.hookSpecificOutput.additionalContext, /big\.js is 3001 lines/);
     const { session_id, ...anonymous } = payload(filePath);
     assert.match(JSON.parse(run(anonymous, DENY).stdout).hookSpecificOutput.additionalContext, /Consider offset/);
-    assert.equal(existsSync(join(iso.env.XDG_CACHE_HOME, 'tokenslim')), false);
+    // Only the two Codex runs have a session id to key the ledger on; the anonymous run records nothing.
+    assert.deepEqual(ledger(iso).readGuard, { skippedRuntime: 2 });
   }));
 });
 
@@ -327,4 +333,157 @@ test('preToolUseDenyOutput uses the documented PreToolUse deny shape', () => {
   assert.deepEqual(preToolUseDenyOutput({}, 'because'), {
     hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'because' },
   });
+});
+
+// --- readGuard counters -----------------------------------------------------------------------------
+
+function adviseHint(filePath, lines, tokens) {
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      additionalContext: `[tokenslim] ${filePath} is ${lines} lines (~${tokens} tokens). Consider offset/limit or Grep.`,
+    },
+  });
+}
+
+test('advise counts a text deny candidate as wouldDeny with its bytes, and the output is unchanged', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'big.js');
+    bigJs(filePath);
+    const size = readFileSync(filePath).length;
+    const result = run(payload(filePath));
+    assert.equal(result.stdout, adviseHint(filePath, 3001, Math.round(size / 3)));
+    const guard = ledger(iso).readGuard;
+    assert.equal(guard.wouldDeny, 1);
+    assert.ok(guard.wouldDenyBytes > 0 && guard.wouldDenyBytes < size, 'a 3001-line file is cut at 2000 lines');
+    assert.deepEqual(Object.keys(guard).sort(), ['wouldDeny', 'wouldDenyBytes']);
+    assert.deepEqual(JSON.parse(readFileSync(historyPath(iso), 'utf8')).days[today()].readGuard, guard);
+    run(payload(filePath));
+    assert.equal(ledger(iso).readGuard.wouldDeny, 2, 'advise has no escape hatch: every large Read counts');
+  }));
+});
+
+test('wouldDenyBytes estimates what the Read would return: readDefaultLines of the file', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'long.txt');
+    writeFileSync(filePath, 'x\n'.repeat(3999), 'utf8'); // 4000 pieces, 7998 bytes
+    const size = readFileSync(filePath).length;
+    run(payload(filePath));
+    assert.equal(ledger(iso).readGuard.wouldDenyBytes, Math.round(size * 2000 / 4000));
+    // A file under readDefaultLines but over the guard's bytes threshold would be returned whole.
+    const small = join(dir, 'small.txt');
+    writeFileSync(small, 'y'.repeat(100) + '\n'.repeat(3), 'utf8');
+    run({ ...payload(small), session_id: 'sess-small' }, { TOKENSLIM_READ_GUARD_LINES: '1' });
+    assert.equal(ledger(iso, 'sess-small').readGuard.wouldDeny, 1);
+    assert.equal(ledger(iso, 'sess-small').readGuard.wouldDenyBytes, readFileSync(small).length);
+    // The estimate follows readDefaultLines.
+    run({ ...payload(filePath), session_id: 'sess-cfg' }, { TOKENSLIM_READ_DEFAULT_LINES: '1000' });
+    assert.equal(ledger(iso, 'sess-cfg').readGuard.wouldDenyBytes, Math.round(size * 1000 / 4000));
+  }));
+});
+
+test('a capped line count still yields a bounded wouldDenyBytes', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'huge.txt');
+    writeFileSync(filePath, 'x\n'.repeat(2_700_000), 'utf8');
+    const size = readFileSync(filePath).length;
+    run(payload(filePath), { TOKENSLIM_READ_GUARD_LINES: '9999999' });
+    const { wouldDeny, wouldDenyBytes } = ledger(iso).readGuard;
+    assert.equal(wouldDeny, 1);
+    assert.ok(wouldDenyBytes > 0 && wouldDenyBytes < size);
+  }));
+});
+
+test('nothing is recorded under threshold, with offset/limit, for non-text files, in off mode or when disabled', () => {
+  withTemp((dir) => session((run, iso) => {
+    const small = join(dir, 'small.js');
+    writeFileSync(small, 'x\n'.repeat(10), 'utf8');
+    assert.equal(run(payload(small)).stdout, '');
+    assert.equal(run(payload(small), DENY).stdout, '');
+    const filePath = join(dir, 'big.js');
+    bigJs(filePath);
+    run(payload(filePath, { offset: 5 }));
+    run(payload(filePath, { limit: 5 }), DENY);
+    run(payload(filePath), { TOKENSLIM_READ_GUARD_MODE: 'off' });
+    run(payload(filePath), { TOKENSLIM_DISABLE: 'readguard' });
+    for (const name of ['shot.png', 'doc.pdf', 'nb.ipynb', 'data.csv']) {
+      const path = join(dir, name);
+      writeFileSync(path, 'x\n'.repeat(2500), 'utf8');
+      assert.match(run(payload(path)).stdout, /Consider offset\/limit or Grep/, name);
+      assert.match(run(payload(path), DENY).stdout, /Consider offset\/limit or Grep/, name);
+    }
+    assert.equal(existsSync(join(iso.env.XDG_CACHE_HOME, 'tokenslim')), false, 'no ledger file at all');
+    assert.equal(existsSync(historyPath(iso)), false);
+  }));
+});
+
+test('advise does not record Codex runs or reads without a session id, and the output stays the hint', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'big.js');
+    bigJs(filePath);
+    const expected = adviseHint(filePath, 3001, Math.round(readFileSync(filePath).length / 3));
+    assert.equal(run(payload(filePath), { TOKENSLIM_HOOK_RUNTIME: 'codex' }).stdout, expected);
+    const { session_id, ...anonymous } = payload(filePath);
+    assert.equal(run(anonymous).stdout, expected);
+    assert.equal(run({ ...payload(filePath), session_id: '' }).stdout, expected);
+    assert.equal(existsSync(join(iso.env.XDG_CACHE_HOME, 'tokenslim')), false);
+  }));
+});
+
+test('deny counts denied on the first Read and repeated on the allowed repeat', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'big.js');
+    bigJs(filePath);
+    const first = run(payload(filePath), DENY);
+    assert.equal(JSON.parse(first.stdout).hookSpecificOutput.permissionDecision, 'deny');
+    assert.deepEqual(ledger(iso).readGuard, { denied: 1 });
+    const second = run(payload(filePath), DENY);
+    assert.equal(second.stdout, '');
+    assert.deepEqual(ledger(iso).readGuard, { denied: 1, repeated: 1 });
+    run(payload(filePath), DENY);
+    const day = JSON.parse(readFileSync(historyPath(iso), 'utf8')).days[today()];
+    assert.deepEqual(day.readGuard, { denied: 2, repeated: 1 });
+    assert.equal('bashGuard' in day, false);
+  }));
+});
+
+test('deny on Codex with a session id counts skippedRuntime and keeps the advise output', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'big.js');
+    bigJs(filePath);
+    const result = run(payload(filePath), { ...DENY, TOKENSLIM_HOOK_RUNTIME: 'codex' });
+    assert.equal(result.stdout, adviseHint(filePath, 3001, Math.round(readFileSync(filePath).length / 3)));
+    assert.deepEqual(ledger(iso).readGuard, { skippedRuntime: 1 });
+    assert.deepEqual(JSON.parse(readFileSync(historyPath(iso), 'utf8')).days[today()].readGuard, { skippedRuntime: 1 });
+  }));
+});
+
+test('readGuard state and history never hold the path or the file name', () => {
+  withTemp((dir) => session((run, iso) => {
+    const filePath = join(dir, 'zephyr-quasar-notes.js');
+    bigJs(filePath);
+    run(payload(filePath));
+    run(payload(filePath), DENY);
+    run(payload(filePath), DENY);
+    run(payload(filePath), { ...DENY, TOKENSLIM_HOOK_RUNTIME: 'codex' });
+    for (const path of [ledgerPath(iso), historyPath(iso)]) {
+      const text = readFileSync(path, 'utf8');
+      assert.match(text, /readGuard/);
+      assert.equal(text.includes('zephyr-quasar'), false, path);
+      assert.equal(text.includes(dir), false, path);
+    }
+    assert.deepEqual(ledger(iso).readGuard, { wouldDeny: 1, wouldDenyBytes: ledger(iso).readGuard.wouldDenyBytes, denied: 1, repeated: 1, skippedRuntime: 1 });
+  }));
+});
+
+test('an unwritable cache never changes the advise output', () => {
+  withTemp((dir) => session((run) => {
+    const filePath = join(dir, 'big.js');
+    bigJs(filePath);
+    const blocker = join(dir, 'not-a-dir');
+    writeFileSync(blocker, 'file', 'utf8');
+    const result = run(payload(filePath), { XDG_CACHE_HOME: blocker });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, adviseHint(filePath, 3001, Math.round(readFileSync(filePath).length / 3)));
+  }));
 });

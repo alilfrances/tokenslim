@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { BASH_GUARD_KEYS, historyPath, loadHistory } from './lib/history.mjs';
+import { BASH_GUARD_KEYS, READ_GUARD_KEYS, historyPath, loadHistory } from './lib/history.mjs';
 
 const cacheDir = join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'tokenslim');
 const args = process.argv.slice(2);
@@ -40,6 +40,7 @@ const RECOVERY_KEYS = ['capped', 'teeRead', 'teeCat', 'rerun'];
 const RECOVERY_WARN_RATE = 0.15;
 const GUARD_WARN_RATE = 0.3;
 const GUARD_CSV_KEYS = ['wouldDeny', 'wouldDenyBytes', 'denied', 'repeated', 'skippedRuntime'];
+const READ_GUARD_CSV_KEYS = GUARD_CSV_KEYS.map((key) => `rg_${key}`);
 // Bash dump guard counters as a report object, or null when none were recorded (so older data renders unchanged).
 // `attemptedBash` is the Bash bytes that reached a hook's size check, the denominator for the shadow estimate.
 function bashGuardFrom(counters, attemptedBash = 0) {
@@ -51,6 +52,18 @@ function bashGuardFrom(counters, attemptedBash = 0) {
     pctOfAttemptedBash: totals.wouldDenyBytes > 0 && attemptedBash > 0 ? pct(totals.wouldDenyBytes, attemptedBash) : null,
     repeatRate: totals.denied > 0 ? totals.repeated / totals.denied : null,
     repeatWarn: totals.denied > 0 && totals.repeated / totals.denied > GUARD_WARN_RATE,
+  };
+}
+// Read guard counters as a report object, or null when none were recorded. `attemptedRead` is the Read bytes that reached
+// a hook's size check; wouldDenyBytes is an upper-bound estimate of what the large Reads would have returned.
+function readGuardFrom(counters, attemptedRead = 0) {
+  const c = Object.fromEntries(READ_GUARD_KEYS.map((key) => [key, n(counters?.[key])]));
+  if (!READ_GUARD_KEYS.some((key) => c[key] > 0)) return null;
+  return {
+    ...c,
+    pctOfAttemptedRead: c.wouldDenyBytes > 0 && attemptedRead > 0 ? pct(c.wouldDenyBytes, attemptedRead) : null,
+    repeatRate: c.denied > 0 ? c.repeated / c.denied : null,
+    repeatWarn: c.denied > 0 && c.repeated / c.denied > GUARD_WARN_RATE,
   };
 }
 function emptyRow() { return { bytesIn: 0, bytesOut: 0, events: 0, bytesAttempted: 0, savedCovered: 0 }; }
@@ -73,7 +86,9 @@ function historyReport(history) {
   const days = [];
   const recovery = {};
   const guard = {};
+  const readGuard = {};
   let attemptedBash = 0;
+  let attemptedRead = 0;
   let totalCovered = 0;
   for (const [day, record] of Object.entries(history.days || {}).sort(([a], [b]) => a.localeCompare(b))) {
     if (!dayAllowed(day)) continue;
@@ -83,13 +98,16 @@ function historyReport(history) {
     for (const [name, item] of Object.entries(record.byCommand || {})) add(commands[name] ||= { bytesIn: 0, bytesOut: 0, events: 0 }, item);
     for (const key of RECOVERY_KEYS) recovery[key] = n(recovery[key]) + n(record.recovery?.[key]);
     for (const key of BASH_GUARD_KEYS) guard[key] = n(guard[key]) + n(record.bashGuard?.[key]);
+    for (const key of READ_GUARD_KEYS) readGuard[key] = n(readGuard[key]) + n(record.readGuard?.[key]);
     attemptedBash += n(record.byTool?.Bash?.bytesAttempted);
+    attemptedRead += n(record.byTool?.Read?.bytesAttempted);
     if (dayTotal.bytesAttempted > 0) totalCovered += saved(dayTotal);
     const dayGuard = project ? null : bashGuardFrom(record.bashGuard, n(record.byTool?.Bash?.bytesAttempted));
-    days.push({ day, bytesIn: dayTotal.bytesIn, bytesOut: dayTotal.bytesOut, events: dayTotal.events, bytesSaved: saved(dayTotal), bytesAttempted: dayTotal.bytesAttempted, recovery: project ? null : recoveryFrom(record.recovery), ...(dayGuard ? { bashGuard: dayGuard } : {}) });
+    const dayReadGuard = project ? null : readGuardFrom(record.readGuard, n(record.byTool?.Read?.bytesAttempted));
+    days.push({ day, bytesIn: dayTotal.bytesIn, bytesOut: dayTotal.bytesOut, events: dayTotal.events, bytesSaved: saved(dayTotal), bytesAttempted: dayTotal.bytesAttempted, recovery: project ? null : recoveryFrom(record.recovery), ...(dayGuard ? { bashGuard: dayGuard } : {}), ...(dayReadGuard ? { readGuard: dayReadGuard } : {}) });
   }
   // Recovery and guard counters are daily and global; they cannot be attributed to a project.
-  return reportObject(rows, commands, days, 'history', totalCovered, project ? null : recoveryFrom(recovery), project ? null : bashGuardFrom(guard, attemptedBash));
+  return reportObject(rows, commands, days, 'history', totalCovered, project ? null : recoveryFrom(recovery), project ? null : bashGuardFrom(guard, attemptedBash), project ? null : readGuardFrom(readGuard, attemptedRead));
 }
 function ledgerReport() {
   const path = positional ? join(cacheDir, `${positional.replace(/[^A-Za-z0-9_-]/g, '')}.json`) : latestLedger();
@@ -108,12 +126,12 @@ function ledgerReport() {
     for (const item of Object.values(rows)) if (n(item.bytesAttempted) > 0) covered += saved(item);
     // Edit savings (Read dedup after an Edit) are part of Read's attempted bytes.
     if (rows.Edit && !n(rows.Edit.bytesAttempted) && n(rows.Read?.bytesAttempted) > 0) covered += saved(rows.Edit);
-    const base = reportObject(Object.fromEntries(Object.entries(rows).map(([t, i]) => [t, { ...i, savedCovered: n(i.bytesAttempted) > 0 ? saved(i) : 0 }])), {}, [], 'ledger', covered, recoveryFrom(state.diagnostics?.Bash?.recovery), bashGuardFrom(state.bashGuard, n(state.attempted?.Bash?.bytes)));
+    const base = reportObject(Object.fromEntries(Object.entries(rows).map(([t, i]) => [t, { ...i, savedCovered: n(i.bytesAttempted) > 0 ? saved(i) : 0 }])), {}, [], 'ledger', covered, recoveryFrom(state.diagnostics?.Bash?.recovery), bashGuardFrom(state.bashGuard, n(state.attempted?.Bash?.bytes)), readGuardFrom(state.readGuard, n(state.attempted?.Read?.bytes)));
     return { ...base, diagnostics: state.diagnostics || {} };
   } catch { return null; }
 }
 function pct(covered, attempted) { return n(attempted) > 0 ? Math.round(n(covered) / n(attempted) * 1000) / 10 : null; }
-function reportObject(rows, commands, days, source, totalCovered = 0, recovery = null, bashGuard = null) {
+function reportObject(rows, commands, days, source, totalCovered = 0, recovery = null, bashGuard = null, readGuard = null) {
   const total = { bytesIn: 0, bytesOut: 0, events: 0 };
   let attempted = 0;
   for (const item of Object.values(rows)) { add(total, item); attempted += n(item.bytesAttempted); }
@@ -125,6 +143,7 @@ function reportObject(rows, commands, days, source, totalCovered = 0, recovery =
     total: { ...total, bytesSaved: saved(total), estTokensSaved: Math.max(0, Math.round(saved(total) / 3)), bytesAttempted: attempted, pctOfAttempted: pct(totalCovered, attempted) },
     byTool, byCommand: decorate(commands), days, recovery,
     ...(bashGuard ? { bashGuard } : {}),
+    ...(readGuard ? { readGuard } : {}),
   };
 }
 function fmt(b) { return b >= 1048576 ? `${(b / 1048576).toFixed(1)}MB` : b >= 1024 ? `${(b / 1024).toFixed(1)}KB` : `${b}B`; }
@@ -142,6 +161,19 @@ function guardLines(g) {
   }
   return lines;
 }
+function readGuardLines(g) {
+  const lines = [];
+  if (g.wouldDeny > 0) {
+    const share = g.pctOfAttemptedRead !== null ? `; ≈${g.pctOfAttemptedRead}% of attempted Read bytes` : '';
+    lines.push(`read guard (advise): ${g.wouldDeny} large Read(s) would be outlined, ${fmt(g.wouldDenyBytes)} of returned text${share}`);
+    lines.push('  set readGuard.mode to "deny" to try it; watch the repeat rate');
+  }
+  if (g.denied > 0) {
+    const skipped = g.skippedRuntime > 0 ? `, skipped ${g.skippedRuntime} (no Claude session)` : '';
+    lines.push(`read guard: denied ${g.denied}, repeated ${g.repeated} (${Math.round(g.repeatRate * 100)}%)${g.repeatWarn ? ` ⚠ above ${Math.round(GUARD_WARN_RATE * 100)}%: the outline was often not enough` : ''}${skipped}`);
+  }
+  return lines;
+}
 function text(report) {
   const title = report.source === 'history' ? `tokenslim savings (${period}${project ? `, project: ${project}` : ''}):` : 'tokenslim savings (this session):';
   const out = [title];
@@ -155,6 +187,7 @@ function text(report) {
     out.push(`bash cap recovery rate: ${Math.round(r.rate * 100)}% (${recovered} of ${r.capped} capped; teeRead ${r.teeRead}, teeCat ${r.teeCat}, rerun ${r.rerun})${r.warn ? ` ⚠ above ${Math.round(RECOVERY_WARN_RATE * 100)}%: the cap may be hiding output the model needs` : ''}`);
   }
   if (report.bashGuard) out.push(...guardLines(report.bashGuard));
+  if (report.readGuard) out.push(...readGuardLines(report.readGuard));
   out.push('note: "% of attempted" counts every Bash/Read/Grep/MCP result that reached its size check (images excluded); cost-weighted savings come from `node scripts/benchmark.mjs --transcripts <dir>`.');
   if (top) {
     const entries = Object.entries(report.byCommand).sort(([, a], [, b]) => b.bytesSaved - a.bytesSaved).slice(0, 10);
@@ -176,11 +209,12 @@ function text(report) {
   return out.join('\n');
 }
 function csv(report) {
-  // Columns are only appended when there is attempted/recovery/guard data, so older data keeps the original header.
+  // Columns are only appended when there is attempted/recovery/guard data (rg_ = read guard), so older data keeps the original header.
   const guard = report.days.some((d) => d.bashGuard);
-  const extra = guard || report.days.some((d) => n(d.bytesAttempted) > 0 || (d.recovery && RECOVERY_KEYS.some((key) => n(d.recovery[key]) > 0)));
-  const lines = [`day,bytesIn,bytesOut,bytesSaved,events${extra ? `,bytesAttempted,${RECOVERY_KEYS.join(',')}` : ''}${guard ? `,${GUARD_CSV_KEYS.join(',')}` : ''}`];
-  for (const d of report.days) lines.push(`${d.day},${d.bytesIn},${d.bytesOut},${d.bytesSaved},${d.events}${extra ? `,${n(d.bytesAttempted)},${RECOVERY_KEYS.map((key) => n(d.recovery?.[key])).join(',')}` : ''}${guard ? `,${GUARD_CSV_KEYS.map((key) => n(d.bashGuard?.[key])).join(',')}` : ''}`);
+  const readGuard = report.days.some((d) => d.readGuard);
+  const extra = guard || readGuard || report.days.some((d) => n(d.bytesAttempted) > 0 || (d.recovery && RECOVERY_KEYS.some((key) => n(d.recovery[key]) > 0)));
+  const lines = [`day,bytesIn,bytesOut,bytesSaved,events${extra ? `,bytesAttempted,${RECOVERY_KEYS.join(',')}` : ''}${guard ? `,${GUARD_CSV_KEYS.join(',')}` : ''}${readGuard ? `,${READ_GUARD_CSV_KEYS.join(',')}` : ''}`];
+  for (const d of report.days) lines.push(`${d.day},${d.bytesIn},${d.bytesOut},${d.bytesSaved},${d.events}${extra ? `,${n(d.bytesAttempted)},${RECOVERY_KEYS.map((key) => n(d.recovery?.[key])).join(',')}` : ''}${guard ? `,${GUARD_CSV_KEYS.map((key) => n(d.bashGuard?.[key])).join(',')}` : ''}${readGuard ? `,${GUARD_CSV_KEYS.map((key) => n(d.readGuard?.[key])).join(',')}` : ''}`);
   return lines.join('\n');
 }
 

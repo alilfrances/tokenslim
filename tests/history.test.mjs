@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
-import { historyPath, loadHistory, updateHistory } from '../scripts/lib/history.mjs';
+import { READ_GUARD_KEYS, historyPath, loadHistory, updateHistory } from '../scripts/lib/history.mjs';
 
 function withData(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tokenslim-history-'));
@@ -52,4 +52,21 @@ test('corrupt history recovers and retention removes records older than 90 days'
   const history = loadHistory(); history.days['2026-04-01'] = { byTool: {}, byCommand: {}, byProject: {} }; writeFileSync(historyPath(), JSON.stringify(history));
   updateHistory([{ tool: 'Read', bytesIn: 9, bytesOut: 3 }], new Date('2026-07-20T00:00:00Z'));
   assert.equal(loadHistory().days['2026-04-01'], undefined);
+}));
+
+test('readGuard events aggregate per day into record.readGuard, apart from savings and bashGuard', () => withData(() => {
+  assert.deepEqual([...READ_GUARD_KEYS], ['wouldDeny', 'wouldDenyBytes', 'denied', 'repeated', 'skippedRuntime']);
+  const date = new Date('2026-07-19T12:00:00Z');
+  assert.equal(updateHistory([
+    { kind: 'readGuard', wouldDeny: 1, wouldDenyBytes: 4000 },
+    { kind: 'readGuard', wouldDeny: 1, wouldDenyBytes: 500, bogus: 7, le800: 3 },
+    { kind: 'readGuard', denied: 2, repeated: 1, skippedRuntime: 'x' },
+    { kind: 'bashGuard', denied: 5 },
+  ], date), true);
+  assert.equal(updateHistory([{ kind: 'readGuard', denied: 1, wouldDeny: -4 }], date), true);
+  const day = loadHistory().days['2026-07-19'];
+  assert.deepEqual(day.readGuard, { wouldDeny: 2, wouldDenyBytes: 4500, denied: 3, repeated: 1 });
+  assert.deepEqual(day.bashGuard, { denied: 5 });
+  assert.deepEqual(day.byTool, {}, 'guard events never count as savings events');
+  assert.deepEqual(day.byCommand, {});
 }));
