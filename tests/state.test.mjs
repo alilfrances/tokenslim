@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -9,9 +9,13 @@ import {
   saveState,
   recordSavings,
   recordDiagnostic,
+  recordBashGuard,
+  recordReadGuard,
   readCache,
   summarize,
 } from '../scripts/lib/state.mjs';
+
+const historyFile = () => join(process.env.XDG_DATA_HOME, 'tokenslim', 'history.json');
 
 function withTempCache(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'tokenslim-state-'));
@@ -144,5 +148,34 @@ test('summarize on empty state returns zeros', () => {
     estCostSavedUsd: 0,
     perTool: {},
     diagnostics: {},
+  });
+});
+
+test('recordReadGuard keeps additive counters apart from bashGuard and queues one history event per call', () => {
+  const state = { version: 1, savings: {}, reads: {} };
+  recordReadGuard(state, { wouldDeny: 1, wouldDenyBytes: 5000 });
+  recordReadGuard(state, { wouldDeny: 1, wouldDenyBytes: 100, denied: 0, bogus: 9, le800: 4 });
+  recordReadGuard(state, { repeated: 1 });
+  assert.deepEqual(state.readGuard, { wouldDeny: 2, wouldDenyBytes: 5100, repeated: 1 });
+  assert.equal('bashGuard' in state, false);
+  assert.deepEqual(state.historyEvents.map((event) => event.kind), ['readGuard', 'readGuard', 'readGuard']);
+  assert.deepEqual(state.historyEvents[1], { kind: 'readGuard', wouldDeny: 1, wouldDenyBytes: 100 });
+  recordBashGuard(state, { denied: 1 });
+  assert.deepEqual(state.bashGuard, { denied: 1 });
+  assert.deepEqual(state.readGuard, { wouldDeny: 2, wouldDenyBytes: 5100, repeated: 1 });
+  assert.equal(recordReadGuard(null, { denied: 1 }), null);
+});
+
+test('a saved ledger with readGuard counters flushes them to history once and reloads cleanly', () => {
+  withTempCache(() => {
+    const state = loadState('rg');
+    recordReadGuard(state, { wouldDeny: 1, wouldDenyBytes: 42 });
+    saveState('rg', state);
+    const loaded = loadState('rg');
+    assert.deepEqual(loaded.readGuard, { wouldDeny: 1, wouldDenyBytes: 42 });
+    assert.equal(loaded.historyEvents, undefined);
+    saveState('rg', loaded);
+    const day = JSON.parse(readFileSync(historyFile(), 'utf8')).days[new Date().toISOString().slice(0, 10)];
+    assert.deepEqual(day.readGuard, { wouldDeny: 1, wouldDenyBytes: 42 });
   });
 });

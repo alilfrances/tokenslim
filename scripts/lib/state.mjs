@@ -9,7 +9,7 @@ import { chmodSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSy
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { BASH_GUARD_KEYS, updateHistory } from './history.mjs';
+import { BASH_GUARD_KEYS, READ_GUARD_KEYS, updateHistory } from './history.mjs';
 import { commandFamily } from './privacy.mjs';
 
 const CHARS_PER_TOKEN = 3; // rough heuristic for code/log text (~3 chars/token)
@@ -137,22 +137,32 @@ export function recordRecovery(state, outcome) {
   return state;
 }
 
-// Bash dump guard counters, in the ledger (state.bashGuard) and as a daily history event. Counts and byte sums only:
-// never a command, a path or a file name. `deltas` keys are BASH_GUARD_KEYS.
-export function recordBashGuard(state, deltas) {
+// Guard counters, in the ledger (state[field]) and as a daily history event of the given kind. Counts and byte sums only:
+// never a command, a path or a file name. `deltas` keys are `keys` (BASH_GUARD_KEYS / READ_GUARD_KEYS).
+function recordGuard(state, field, keys, deltas) {
   if (!state || typeof state !== 'object') return state;
-  const counters = state.bashGuard && typeof state.bashGuard === 'object' ? state.bashGuard : {};
-  const event = { kind: 'bashGuard' };
-  for (const key of BASH_GUARD_KEYS) {
+  const counters = state[field] && typeof state[field] === 'object' ? state[field] : {};
+  const event = { kind: field };
+  for (const key of keys) {
     const value = Number(deltas?.[key]) || 0;
     if (value <= 0) continue;
     counters[key] = (Number(counters[key]) || 0) + value;
     event[key] = value;
   }
-  state.bashGuard = counters;
+  state[field] = counters;
   if (!Array.isArray(state.historyEvents)) state.historyEvents = [];
   state.historyEvents.push(event);
   return state;
+}
+
+// Bash dump guard counters (state.bashGuard, history kind 'bashGuard').
+export function recordBashGuard(state, deltas) {
+  return recordGuard(state, 'bashGuard', BASH_GUARD_KEYS, deltas);
+}
+
+// Read guard counters (state.readGuard, history kind 'readGuard').
+export function recordReadGuard(state, deltas) {
+  return recordGuard(state, 'readGuard', READ_GUARD_KEYS, deltas);
 }
 
 const RECENT_BASH = 3;

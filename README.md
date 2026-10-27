@@ -43,6 +43,13 @@ is intentionally left untouched. Savings compound because input tokens are re-se
 Pairs with [caveman](https://github.com/JuliusBrussee/caveman) (output-side compression):
 caveman makes the model say less, tokenslim makes it *read* less.
 
+## What's new in 0.5.1
+
+- **Read guard measurement.** In `advise` the Read guard now records the large Reads that `deny` would have outlined;
+  in `deny` it records denied and repeated Reads. All of it shows in `/tokenslim:tokenstats`, so you can decide on
+  `readGuard.mode: "deny"` from real data. No behavior change: the hook output is byte-identical in every mode.
+- 0.5.0 added the Bash dump guard (shadow by default) and `benchmark --classify`.
+
 ## What's new in 0.4.0
 
 - **Breaking: Bash quiet-rewrites are now off by default.** An applied rewrite auto-approves the
@@ -353,6 +360,17 @@ cut copy of them and the model only sees Claude Code's preview (see `docs/SHAPES
   Codex falls back to `advise`, because deny is unverified there. Deny only pays off when the model
   takes the outline's hint, so it stays off until you have compared it on your own work.
 - `off` (or `TOKENSLIM_DISABLE=readguard`) disables the guard.
+- **Measurement.** Since 0.5.1 the guard counts what `deny` would act on, without changing its output. In
+  `advise`, each large Read of a text file (with a Claude session id) counts as `wouldDeny`, with the
+  `wouldDenyBytes` it would have returned; in `deny`, it counts `denied` and `repeated`, plus
+  `skippedRuntime` on Codex. Counts and byte sums go to the session ledger and the daily history, never a
+  path, file name or content; reads under the threshold and non-text files record nothing.
+  `/tokenslim:tokenstats` shows `read guard (advise): N large Read(s) would be outlined, X of returned
+  text; ≈Y% of attempted Read bytes` and, in deny mode, `read guard: denied N, repeated M (R%)` with a `⚠`
+  above 30%. The bytes are an upper-bound estimate of what the Read would return (Claude Code's unbounded
+  Read stops at `readDefaultLines` lines, 2000 by default), not a measured number. Watch the advise
+  numbers for a week, then try `deny`; if the repeat rate stays above 30%, raise `readGuard.lines` or go
+  back to `advise`.
 
 ### Bash dump guard
 
