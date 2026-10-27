@@ -255,3 +255,14 @@ Success means a drop in units per active hour in the buckets each WP targets.
 WP0 → WP1 (including the plugin-skill `skillOverrides` probe) → WP2 → WP3 → WP-R.
 
 WP0 lands first because it is both the measuring stick and the source of WP1's and WP2's numbers. Each WP is one reviewed commit.
+
+---
+
+## Status: shelved (not built)
+
+On review the plan was not worth a release:
+- Most of it duplicates features Claude Code already ships or is moving toward: usage-based skill-listing pruning, deferred MCP tools, the `prompt_cache` statusline fields, `/usage` attribution, TTL settings and idle compaction. Building it would mean tracking internal file formats that change quickly.
+- The automatic parts (auto-prune, auto-TTL) were estimated at 1–5% and 0–4% of spend, with ongoing maintenance and breakage risk.
+- WP0 and WP2 save nothing on their own: they only report.
+
+Instead, v0.5.1 gives the Read guard the same measurement the Bash dump guard has. Both guards can then move from measuring to `deny` on the user's own data, which is the largest lever left that does not change accuracy.
